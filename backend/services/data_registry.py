@@ -75,16 +75,17 @@ def _ds(
 DATASETS: list[dict] = [
     # --- Base / boundary ---
     _ds("madurai_boundary", "Madurai administrative boundary", "Boundary",
-        Status.DEMO_ONLY,
-        source="Placeholder bounding-box polygon (scaffold)",
-        authority="Survey of India / OpenStreetMap (target)",
+        Status.AVAILABLE,
+        source="OpenStreetMap relation 11268397 (Madurai, admin_level 8)",
+        authority="OpenStreetMap contributors",
+        acquisition_date="2026-09-08",
         last_updated="2026-09-08",
-        license="ODbL (target source)",
-        limitations="Current file is a rectangular placeholder. Run "
-                    "scripts/fetch_boundary.py to replace with the real OSM "
-                    "relation before any spatial analysis.",
-        acquisition="OSM relation via Nominatim/Overpass; or SoI district sheet.",
-        analytical_eligible=False),
+        license="ODbL 1.0",
+        limitations="Municipal Corporation boundary as mapped in OSM; not a "
+                    "surveyed cadastral limit. Refresh with "
+                    "scripts/fetch_boundary.py.",
+        acquisition="scripts/fetch_boundary.py (Overpass).",
+        analytical_eligible=True),
 
     # --- OpenStreetMap (keyless, live) ---
     _ds("osm_infrastructure", "OSM infrastructure (roads, health, education, transit)", "Infrastructure",

@@ -50,8 +50,9 @@ Routes: `/` `/explorer` `/intelligence` `/history` `/climate` `/data-registry`
 
 ## Phase 4 — Map layers ✅ (available layers)
 
-- Boundary: **placeholder bbox, labelled DEMO**, red dashed. Real fetch:
-  `backend/scripts/fetch_boundary.py`.
+- Boundary: **real** — OSM relation 11268397 (Madurai Corporation, admin_level
+  8, Q228405), MultiPolygon, fetched via `backend/scripts/fetch_boundary.py`.
+  Registry flipped to AVAILABLE / analytically eligible. Renders solid blue.
 - OSM infrastructure: live Overpass, cached to `backend/data/`, warmed on
   startup. Roads as lines, hospitals/schools/stations as points.
 - Terrain / LULC / LULC history / LULC change endpoints return a structured
@@ -72,14 +73,27 @@ Routes: `/` `/explorer` `/intelligence` `/history` `/climate` `/data-registry`
   `scorable: false` and lists the missing features rather than guessing.
   Scoring path is implemented and unit-shaped for when the data lands.
 
+## Phase 7 — Integration & testing ✅
+
+- **Automated tests:** `backend/tests/` — 26 pytest cases, all green in ~1.4 s
+  (`cd backend && python -m pytest`). Cover registry + gate, quality audit,
+  evidence structure + AOI rejection, descriptive-only report, PDF/JSON/manifest
+  exports, partial feature vector, suitability refusing incomplete evidence,
+  real boundary, terrain "unavailable not fake", demo-grid flagging.
+- **E2E click-through:** Explorer map click → "Land Intelligence for …" →
+  auto-analysed evidence report. Verified in-browser.
+- **Performance (warm):** static/GIS endpoints ~0.2–0.36 s; POST endpoints
+  1.3–1.8 s first hit (Open-Meteo), ~0.23 s after the per-coord climate cache.
+  PDF export ~1.4 s. All within the plan's targets (API < 2 s, report < 5 s,
+  PDF < 10 s).
+- Added a process-lifetime climate cache keyed by ~1 km rounded coordinate.
+
 ## Not done / next
 
-- Phase 7 end-to-end + perf pass (manual click-through done; no automated tests
-  yet).
-- Acquire open rasters: run a DEM fetch (OpenTopography / AWS COG) and Esri
-  LULC AOI export, store under `backend/data/`, flip registry statuses, and the
-  terrain/LULC extractors + suitability scoring light up automatically.
-- Replace placeholder boundary via `fetch_boundary.py`.
+- Acquire open rasters from their providers (DEM, Esri LULC 2017/2024), store
+  under `backend/data/`, flip registry statuses; the terrain/LULC extractors +
+  suitability scoring then light up automatically. `rasterio`/`numpy` are
+  already installed in the venv for this. *(User chose to fetch these later.)*
 - Richer A4 PDF (reportlab/weasyprint) if needed.
 - Phase 6F-3+ (spatial application, historical validation, prediction) — not
   before historical validation, per the plan.

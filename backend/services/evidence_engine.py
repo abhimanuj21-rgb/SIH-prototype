@@ -60,11 +60,20 @@ def _haversine_m(lat1, lon1, lat2, lon2) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
+# Climate normals barely move day to day; cache by ~1 km rounded coord for the
+# process lifetime so repeat evidence/feature/suitability calls stay fast.
+_CLIMATE_CACHE: dict[tuple[float, float], dict] = {}
+
+
 # --- verified evidence sources ---------------------------------------------
 def _climate_evidence(lat: float, lon: float) -> dict:
     """Real ERA5 climate normals from Open-Meteo Archive (keyless)."""
     if not reg.can_use_for_analysis("open_meteo_climate"):
         return {"ok": False, "reason": "open_meteo_climate not analytically eligible"}
+
+    ckey = (round(lat, 2), round(lon, 2))
+    if ckey in _CLIMATE_CACHE:
+        return _CLIMATE_CACHE[ckey]
     end = date.today().replace(year=date.today().year - 1)
     start = end.replace(year=end.year - 9)  # ~10 climate years
     url = "https://archive-api.open-meteo.com/v1/archive"
@@ -91,7 +100,7 @@ def _climate_evidence(lat: float, lon: float) -> dict:
         return {"ok": False, "reason": "Open-Meteo returned no usable values"}
 
     years = max(1, len(precs) / 365.25)
-    return {
+    result = {
         "ok": True,
         "value": {
             "period": f"{start.isoformat()} to {end.isoformat()}",
@@ -109,6 +118,8 @@ def _climate_evidence(lat: float, lon: float) -> dict:
             "confidence": "high",
         },
     }
+    _CLIMATE_CACHE[ckey] = result
+    return result
 
 
 def _iter_feature_points(feat: dict):
