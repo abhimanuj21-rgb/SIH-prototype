@@ -1,0 +1,30 @@
+{
+  "type": "FeatureCollection",
+  "properties": {
+    "_warning": "PLACEHOLDER — this is a rectangular bounding box, NOT the real Madurai administrative boundary. Replace with scripts/fetch_boundary.py output before any spatial analysis.",
+    "is_demo": true,
+    "source": "scaffold placeholder"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Madurai (placeholder bbox)",
+        "is_demo": true,
+        "admin_level": null
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [78.06, 9.86],
+            [78.18, 9.86],
+            [78.18, 9.98],
+            [78.06, 9.98],
+            [78.06, 9.86]
+          ]
+        ]
+      }
+    }
+  ]
+}
