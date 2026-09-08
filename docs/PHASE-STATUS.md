@@ -4,6 +4,30 @@ Built from scratch on 2026-09-08 following the development execution plan.
 The plan assumed an existing codebase with a blank-page bug; the target folder
 was empty, so Phase 1 became "build the app shell" rather than "debug" it.
 
+## Addendum (2026-09-08) — site context, base maps, UI pass
+
+- **Site character** (`POST /api/v1/evidence/site-context`, shown on Land
+  Intelligence): water source & bodies (nearest river/stream, tank/pond,
+  canal; counts within 2.5 km; inland-coast note), land use (agricultural vs
+  built-up, from OSM `landuse` polygons + point-in-polygon), and a development
+  level (Urban / Suburban / Rural / …) from an OSM land-use + road-network
+  proxy. Computed locally from the cached AOI layers — **~0.3 s**, no Overpass
+  call on the request path — after a one-time layer warm-up. Honest caveats
+  throughout: OSM land-use is a tag, not a raster; definitive land cover still
+  needs the Esri/Sentinel-2 gap.
+- **New map layers & base maps** — Explorer now has OSM Standard, Esri
+  Satellite / Light / Dark, OSM Humanitarian base layers, plus toggleable
+  hydrology (`/gis/madurai/hydrology/osm`) and land-use
+  (`/gis/madurai/landuse/osm`) overlays, a legend, and `invalidateSize`
+  handling. Satellite view gives the "street-level / how-built-up" read.
+- **External views** — per-point links to OpenStreetMap, Google Maps, Google
+  Street View, Mapillary and Bhuvan (plain anchors, nothing sent until click).
+- **UI pass** — refined dark theme (tokens, shadows, radii), grouped sidebar
+  with icons, sticky header with page title, stat tiles, section headers,
+  skeleton loaders, chips, responsive < 900 px.
+- Tests: 32 pytest cases green (added site-context + geometry helpers).
+  `services/geo.py` extracted for shared geometry.
+
 ## Phase 1 — Frontend stabilization & backend scaffold ✅
 
 | Success criterion | State |

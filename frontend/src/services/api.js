@@ -48,6 +48,8 @@ export const api = {
     request('/evidence/location', { method: 'POST', body: { latitude, longitude } }),
   evidenceReport: (latitude, longitude) =>
     request('/evidence/report', { method: 'POST', body: { latitude, longitude } }),
+  siteContext: (latitude, longitude) =>
+    request('/evidence/site-context', { method: 'POST', body: { latitude, longitude }, timeout: 150000 }),
   exportUrl: (kind, latitude, longitude) =>
     `${BASE}/evidence/export/${kind}?latitude=${latitude}&longitude=${longitude}`,
   manifestUrl: () => `${BASE}/evidence/export/manifest`,
@@ -61,6 +63,8 @@ export const api = {
   // gis
   boundary: () => request('/gis/madurai/boundary'),
   infrastructure: () => request('/gis/madurai/infrastructure/osm', { timeout: 180000 }),
+  hydrology: () => request('/gis/madurai/hydrology/osm', { timeout: 180000 }),
+  landuse: () => request('/gis/madurai/landuse/osm', { timeout: 200000 }),
   terrain: () => request('/gis/madurai/terrain'),
   lulc: () => request('/gis/madurai/lulc'),
   lulcHistory: () => request('/gis/madurai/lulc/history'),

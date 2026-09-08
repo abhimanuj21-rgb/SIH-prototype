@@ -65,6 +65,24 @@ def test_evidence_rejects_outside_aoi(client):
     assert "area of interest" in r["error"].lower()
 
 
+def test_site_context_shape(client):
+    r = client.post("/api/v1/evidence/site-context", json=CORE).json()
+    assert "location" in r
+    if r.get("available"):
+        for block in ("water", "land_use", "development"):
+            assert block in r
+        assert "level" in r["development"]
+        assert "not a" in r["development"]["method"].lower()  # honest caveat
+        assert r["provenance"]["confidence"] == "medium"
+    else:
+        assert r.get("reason")
+
+
+def test_site_context_rejects_outside_aoi(client):
+    r = client.post("/api/v1/evidence/site-context", json=OUTSIDE).json()
+    assert r["available"] is False
+
+
 def test_evidence_report_is_descriptive(client):
     r = client.post("/api/v1/evidence/report", json=CORE).json()
     assert r["report_type"] == "location_evidence"

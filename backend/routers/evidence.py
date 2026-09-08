@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from services import evidence_engine as ee
+from services import site_context as sc
 
 router = APIRouter()
 
@@ -18,6 +19,18 @@ class Coord(BaseModel):
 @router.post("/location")
 def location_evidence(c: Coord):
     return ee.get_location_evidence(c.latitude, c.longitude)
+
+
+@router.post("/site-context")
+def site_context(c: Coord):
+    """Water / land-use / development context for a point, from live OSM."""
+    chk = ee.validate_coordinate(c.latitude, c.longitude)
+    if not chk["valid"]:
+        return {"available": False, "reason": chk["reason"]}
+    return {"location": {"latitude": round(c.latitude, 6),
+                         "longitude": round(c.longitude, 6),
+                         "in_city_core": chk.get("in_city_core", False)},
+            **sc.build_site_context(c.latitude, c.longitude)}
 
 
 @router.post("/report")

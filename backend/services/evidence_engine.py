@@ -230,7 +230,8 @@ _KNOWN_GAPS = [
 ]
 
 
-def get_location_evidence(lat: float, lon: float) -> dict:
+def get_location_evidence(lat: float, lon: float,
+                          include_site_context: bool = False) -> dict:
     check = validate_coordinate(lat, lon)
     if not check["valid"]:
         return {"error": check["reason"], "coordinate_check": check}
@@ -249,6 +250,22 @@ def get_location_evidence(lat: float, lon: float) -> dict:
                 "reason": res.get("reason", "unavailable"),
                 "resolution": "Retry when the live source is reachable.",
             })
+
+    # Site context (water / land use / development) from live OSM. This hits
+    # Overpass and can be slow, so it is opt-in — the frontend requests it on a
+    # separate call with its own loading state; /report never blocks on it.
+    if include_site_context:
+        from services import site_context as sc  # lazy: avoids an import cycle
+        ctx = sc.build_site_context(lat, lon)
+        if ctx.get("available"):
+            for topic in ("water", "land_use", "development"):
+                verified.append({"topic": topic, "value": ctx[topic],
+                                 "provenance": ctx["provenance"]})
+        else:
+            for topic in ("water", "land_use", "development"):
+                gaps.append({"topic": topic,
+                             "reason": ctx.get("reason", "OSM site context unavailable"),
+                             "resolution": "Retry when Overpass is reachable."})
 
     for topic, ds_id, reason in _KNOWN_GAPS:
         d = reg.get_dataset(ds_id)

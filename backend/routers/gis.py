@@ -116,14 +116,102 @@ def infrastructure_osm(refresh: bool = False):
 
 
 def warm_infrastructure_cache() -> None:
-    """Best-effort background prefetch so Explorer has data on first open."""
-    cache = DATA_DIR / "osm_infrastructure.geojson"
-    if cache.exists() and time.time() - cache.stat().st_mtime < 7 * 24 * 3600:
-        return
+    """Best-effort background prefetch so Explorer + site context have data."""
+    for fn in (infrastructure_osm, hydrology_osm, landuse_osm):
+        try:
+            fn(refresh=False)
+        except Exception:  # noqa: BLE001 - warm-up must never crash startup
+            pass
+
+
+def _ways_to_features(els: list, line_tags: tuple, poly_kind: str) -> list:
+    """Split Overpass ways into LineString/Polygon features by their tags."""
+    feats = []
+    for e in els:
+        if e.get("type") != "way":
+            continue
+        tags = e.get("tags", {})
+        coords = [[p["lon"], p["lat"]] for p in e.get("geometry", []) if p.get("lon") is not None]
+        if len(coords) < 2:
+            continue
+        is_line = any(t in tags for t in line_tags)
+        closed = len(coords) >= 4 and coords[0] == coords[-1]
+        if is_line and not closed:
+            geom = {"type": "LineString", "coordinates": coords}
+            kind = "line"
+        else:
+            if not closed:
+                coords = coords + [coords[0]]
+            geom = {"type": "Polygon", "coordinates": [coords]}
+            kind = poly_kind
+        feats.append({"type": "Feature", "geometry": geom,
+                      "properties": {"kind": kind, "name": tags.get("name", ""),
+                                     "osm_id": e.get("id"),
+                                     "tag": tags.get("waterway") or tags.get("water")
+                                     or tags.get("natural") or tags.get("landuse", "")}})
+    return feats
+
+
+@router.get("/madurai/hydrology/osm")
+def hydrology_osm(refresh: bool = False):
+    cache = DATA_DIR / "osm_hydrology.geojson"
+    if cache.exists() and not refresh and time.time() - cache.stat().st_mtime < 7 * 24 * 3600:
+        return {"available": True, "dataset": "osm_hydrology", "cached": True,
+                "geojson": json.loads(cache.read_text("utf-8"))}
+    a = ee.AOI
+    bbox = f"{a['lat_min']},{a['lon_min']},{a['lat_max']},{a['lon_max']}"
+    q = f"""
+    [out:json][timeout:150];
+    (
+      way({bbox})["natural"="water"];
+      way({bbox})["waterway"~"^(river|canal|stream)$"];
+      way({bbox})["landuse"~"^(reservoir|basin)$"];
+    );
+    out geom tags;
+    """
     try:
-        infrastructure_osm(refresh=True)
-    except Exception:  # noqa: BLE001 - warm-up must never crash startup
-        pass
+        els = overpass.query(q, timeout=125.0)
+    except overpass.OverpassError as exc:
+        return {"available": False, "dataset": "osm_hydrology",
+                "reason": f"Overpass unreachable ({exc})",
+                "geojson": {"type": "FeatureCollection", "features": []}}
+    feats = _ways_to_features(els, line_tags=("waterway",), poly_kind="waterbody")
+    fc = {"type": "FeatureCollection", "features": feats,
+          "properties": {"source": "OpenStreetMap via Overpass",
+                         "retrieved": time.strftime("%Y-%m-%d")}}
+    cache.write_text(json.dumps(fc), encoding="utf-8")
+    return {"available": True, "dataset": "osm_hydrology", "cached": False,
+            "count": len(feats), "geojson": fc}
+
+
+@router.get("/madurai/landuse/osm")
+def landuse_osm(refresh: bool = False):
+    cache = DATA_DIR / "osm_landuse.geojson"
+    if cache.exists() and not refresh and time.time() - cache.stat().st_mtime < 7 * 24 * 3600:
+        return {"available": True, "dataset": "osm_landuse", "cached": True,
+                "geojson": json.loads(cache.read_text("utf-8"))}
+    a = ee.AOI
+    bbox = f"{a['lat_min']},{a['lon_min']},{a['lat_max']},{a['lon_max']}"
+    q = f"""
+    [out:json][timeout:150];
+    (
+      way({bbox})["landuse"~"^(farmland|farmyard|orchard|residential|commercial|retail|industrial|forest|meadow|quarry|construction)$"];
+    );
+    out geom tags;
+    """
+    try:
+        els = overpass.query(q, timeout=155.0)
+    except overpass.OverpassError as exc:
+        return {"available": False, "dataset": "osm_landuse",
+                "reason": f"Overpass unreachable ({exc})",
+                "geojson": {"type": "FeatureCollection", "features": []}}
+    feats = _ways_to_features(els, line_tags=(), poly_kind="landuse")
+    fc = {"type": "FeatureCollection", "features": feats,
+          "properties": {"source": "OpenStreetMap via Overpass",
+                         "retrieved": time.strftime("%Y-%m-%d")}}
+    cache.write_text(json.dumps(fc), encoding="utf-8")
+    return {"available": True, "dataset": "osm_landuse", "cached": False,
+            "count": len(feats), "geojson": fc}
 
 
 @router.get("/madurai/terrain")

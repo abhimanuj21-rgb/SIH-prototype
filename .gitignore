@@ -12,6 +12,9 @@ npm-debug.log*
 
 # Data caches (regenerated at runtime)
 backend/data/osm_infrastructure.geojson
+backend/data/osm_hydrology.geojson
+backend/data/osm_landuse.geojson
+backend/data/site_context_cache.json
 backend/data/features_cache.json
 
 # Editor / OS
