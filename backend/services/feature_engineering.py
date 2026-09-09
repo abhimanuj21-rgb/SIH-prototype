@@ -68,9 +68,9 @@ def extract_infrastructure_features(lat: float, lon: float) -> dict:
         "available": True,
         "features": {
             "distance_to_road_m": v["distance_to_road_m"],
-            "distance_to_hospital_m": v["distance_to_hospital_m"],
-            "distance_to_school_m": v["distance_to_school_m"],
-            "distance_to_transit_m": v["distance_to_transit_m"],
+            "distance_to_hospital_m": v["distance_to_clinic_or_hospital_m"],
+            "distance_to_school_m": v["distance_to_school_or_college_m"],
+            "distance_to_transit_m": v["distance_to_railway_station_m"],
         },
         "provenance": {**res["provenance"], "extracted": date.today().isoformat()},
     }

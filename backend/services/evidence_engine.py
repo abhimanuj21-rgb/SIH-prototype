@@ -165,29 +165,34 @@ def _infrastructure_evidence(lat: float, lon: float) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "reason": f"cached layer unreadable: {exc.__class__.__name__}"}
 
-    best = {"road": None, "hospital": None, "education": None, "rail_station": None}
+    # nearest by the individual kinds emitted by the /gis layer
+    raw = {"road": None, "hospital": None, "clinic": None,
+           "school": None, "college": None, "rail_station": None}
     for feat in fc.get("features", []):
         kind = (feat.get("properties") or {}).get("kind")
-        if kind not in best:
+        if kind not in raw:
             continue
         for plat, plon in _iter_feature_points(feat):
             d = _haversine_m(lat, lon, plat, plon)
-            if best[kind] is None or d < best[kind]:
-                best[kind] = d
+            if raw[kind] is None or d < raw[kind]:
+                raw[kind] = d
 
-    if all(v is None for v in best.values()):
+    def nearest(*keys):
+        vals = [raw[k] for k in keys if raw[k] is not None]
+        return round(min(vals), 0) if vals else None
+
+    if all(v is None for v in raw.values()):
         return {"ok": False, "reason": "No usable features in the cached layer."}
-
-    def r(v):
-        return None if v is None else round(v, 0)
 
     return {
         "ok": True,
         "value": {
-            "distance_to_road_m": r(best["road"]),
-            "distance_to_hospital_m": r(best["hospital"]),
-            "distance_to_school_m": r(best["education"]),
-            "distance_to_transit_m": r(best["rail_station"]),
+            "distance_to_road_m": nearest("road"),
+            "distance_to_hospital_m": nearest("hospital"),
+            "distance_to_clinic_or_hospital_m": nearest("hospital", "clinic"),
+            "distance_to_school_m": nearest("school"),
+            "distance_to_school_or_college_m": nearest("school", "college"),
+            "distance_to_railway_station_m": nearest("rail_station"),
         },
         "provenance": {
             "dataset": "osm_infrastructure",

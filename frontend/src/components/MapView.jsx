@@ -7,6 +7,7 @@ import L from 'leaflet'
 import api from '../services/api.js'
 
 const MADURAI_CENTER = [9.925, 78.119]
+const POI_MIN_ZOOM = 13
 
 const pickIcon = L.divIcon({
   className: '',
@@ -15,17 +16,25 @@ const pickIcon = L.divIcon({
   iconAnchor: [8, 8],
 })
 
-const POI_COLOR = {
-  hospital: '#f87171',
-  education: '#fbbf24',
-  rail_station: '#c084fc',
-  other: '#94a3b8',
+// stroke stays white for contrast on satellite; fill carries the meaning
+const POI = {
+  hospital:     { fill: '#ef4444', label: 'Hospital' },
+  clinic:       { fill: '#f59e0b', label: 'Clinic / doctor' },
+  school:       { fill: '#22c55e', label: 'School' },
+  college:      { fill: '#3b82f6', label: 'College / university' },
+  rail_station: { fill: '#a855f7', label: 'Railway station' },
+  other:        { fill: '#94a3b8', label: 'Other' },
 }
 const LU_COLOR = {
   farmland: '#4ade80', farmyard: '#4ade80', orchard: '#22c55e',
   residential: '#fb923c', commercial: '#f97316', retail: '#f97316',
   industrial: '#a16207', construction: '#eab308', forest: '#15803d',
   meadow: '#84cc16', quarry: '#78716c',
+}
+
+function osmUrl(p) {
+  const t = p?.osm_type || 'node'
+  return p?.osm_id ? `https://www.openstreetmap.org/${t}/${p.osm_id}` : null
 }
 
 function FixSize() {
@@ -37,12 +46,12 @@ function FixSize() {
   return null
 }
 
-function ClickCapture({ onPick }) {
-  useMapEvents({
-    click(e) {
-      onPick?.({ lat: +e.latlng.lat.toFixed(6), lng: +e.latlng.lng.toFixed(6) })
-    },
+function MapEvents({ onPick, onZoom }) {
+  const map = useMapEvents({
+    click(e) { onPick?.({ lat: +e.latlng.lat.toFixed(6), lng: +e.latlng.lng.toFixed(6) }) },
+    zoomend() { onZoom?.(map.getZoom()) },
   })
+  useEffect(() => { onZoom?.(map.getZoom()) }, []) // eslint-disable-line
   return null
 }
 
@@ -57,6 +66,7 @@ export default function MapView({
   const [landuse, setLanduse] = useState(null)
   const [demoGrid, setDemoGrid] = useState(null)
   const [notes, setNotes] = useState({})
+  const [zoom, setZoom] = useState(12)
 
   const note = (k, v) => setNotes((n) => ({ ...n, [k]: v }))
 
@@ -84,7 +94,7 @@ export default function MapView({
     if (!layers.landuse || landuse) return
     note('landuse', 'loading…')
     api.landuse()
-      .then((r) => { r?.available ? setLanduse(r.geojson) : note('landuse', r?.reason); if (r?.available) note('landuse', null) })
+      .then((r) => { if (r?.available) { setLanduse(r.geojson); note('landuse', null) } else note('landuse', r?.reason) })
       .catch((e) => note('landuse', e.message))
   }, [layers.landuse]) // eslint-disable-line
 
@@ -102,6 +112,12 @@ export default function MapView({
     features: (infra?.features || []).filter((f) => f.geometry?.type === 'LineString'),
   }), [infra])
 
+  const showPois = layers.infrastructure && zoom >= POI_MIN_ZOOM
+  const poiKinds = useMemo(
+    () => [...new Set(pois.map((f) => f.properties?.kind || 'other'))],
+    [pois],
+  )
+
   return (
     <div className="map-wrap">
       <MapContainer center={MADURAI_CENTER} zoom={12} scrollWheelZoom>
@@ -117,13 +133,11 @@ export default function MapView({
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
           </LayersControl.BaseLayer>
           <LayersControl.BaseLayer name="Light (Esri)">
-            <TileLayer maxZoom={16}
-              attribution='Tiles &copy; Esri'
+            <TileLayer maxZoom={16} attribution='Tiles &copy; Esri'
               url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}" />
           </LayersControl.BaseLayer>
           <LayersControl.BaseLayer name="Dark (Esri)">
-            <TileLayer maxZoom={16}
-              attribution='Tiles &copy; Esri'
+            <TileLayer maxZoom={16} attribution='Tiles &copy; Esri'
               url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}" />
           </LayersControl.BaseLayer>
           <LayersControl.BaseLayer name="OSM Humanitarian">
@@ -141,10 +155,7 @@ export default function MapView({
 
         {layers.landuse && landuse && (
           <GeoJSON key={`lu-${landuse.features.length}`} data={landuse}
-            style={(f) => {
-              const t = f.properties?.tag
-              return { color: LU_COLOR[t] || '#64748b', weight: 1, fillOpacity: 0.18 }
-            }}
+            style={(f) => ({ color: LU_COLOR[f.properties?.tag] || '#64748b', weight: 1, fillOpacity: 0.18 })}
             onEachFeature={(f, layer) => layer.bindPopup(
               `<strong>${f.properties?.name || 'land use'}</strong><br/>landuse=${f.properties?.tag}`)} />
         )}
@@ -168,13 +179,22 @@ export default function MapView({
             style={{ color: '#64748b', weight: 1.3, opacity: 0.7 }} />
         )}
 
-        {layers.infrastructure && pois.map((f) => {
+        {showPois && pois.map((f) => {
           const [lng, lat] = f.geometry.coordinates
-          const kind = f.properties?.kind || 'other'
+          const p = f.properties || {}
+          const kind = p.kind || 'other'
+          const meta = POI[kind] || POI.other
+          const url = osmUrl(p)
           return (
-            <CircleMarker key={`${f.properties?.osm_id}-${kind}`} center={[lat, lng]}
-              radius={5} pathOptions={{ color: POI_COLOR[kind] || '#94a3b8', weight: 1, fillOpacity: 0.85 }}>
-              <Popup><strong>{f.properties?.name || '(unnamed)'}</strong><br />{kind}</Popup>
+            <CircleMarker key={`${p.osm_type}-${p.osm_id}`} center={[lat, lng]}
+              radius={kind === 'hospital' ? 6 : 5}
+              pathOptions={{ color: '#fff', weight: 1.5, fillColor: meta.fill, fillOpacity: 0.95 }}>
+              <Popup>
+                <strong>{p.name || `(unnamed ${meta.label.toLowerCase()})`}</strong><br />
+                <span style={{ color: '#9db0c9' }}>{meta.label} · <code>{p.osm_tag}</code></span>
+                {p.operator ? <><br />operator: {p.operator}</> : null}
+                {url && <><br /><a href={url} target="_blank" rel="noreferrer">verify / fix on OpenStreetMap ↗</a></>}
+              </Popup>
             </CircleMarker>
           )
         })}
@@ -185,7 +205,7 @@ export default function MapView({
           </Marker>
         )}
 
-        <ClickCapture onPick={onPick} />
+        <MapEvents onPick={onPick} onZoom={setZoom} />
       </MapContainer>
 
       <div className="map-legend">
@@ -194,18 +214,27 @@ export default function MapView({
         {layers.hydrology && <div className="lg-row"><span className="sw" style={{ background: '#38bdf8' }} /> Water bodies</div>}
         {layers.infrastructure && <>
           <div className="lg-row"><span className="sw line" style={{ background: '#64748b' }} /> Major roads</div>
-          <div className="lg-row"><span className="sw" style={{ background: '#f87171' }} /> Hospital / clinic</div>
-          <div className="lg-row"><span className="sw" style={{ background: '#fbbf24' }} /> School / college</div>
-          <div className="lg-row"><span className="sw" style={{ background: '#c084fc' }} /> Rail station</div>
+          {(showPois ? poiKinds : Object.keys(POI).filter((k) => k !== 'other')).map((k) => (
+            <div className="lg-row" key={k}><span className="sw" style={{ background: POI[k]?.fill }} /> {POI[k]?.label || k}</div>
+          ))}
         </>}
         {layers.landuse && <>
           <div className="lg-row"><span className="sw" style={{ background: '#4ade80' }} /> Farmland</div>
           <div className="lg-row"><span className="sw" style={{ background: '#fb923c' }} /> Residential / built</div>
         </>}
-        {(notes.infra || notes.hydro || notes.landuse) && (
+        {layers.infrastructure && !showPois && (
+          <div className="lg-row faint" style={{ marginTop: 6 }}>Zoom in to see facilities</div>
+        )}
+        {layers.infrastructure && showPois && (
+          <div className="lg-row faint" style={{ marginTop: 6 }}>Facilities are OSM data — click to verify</div>
+        )}
+        {(notes.infra || notes.hydro || (notes.landuse && notes.landuse !== 'loading…')) && (
           <div className="lg-row faint" style={{ marginTop: 6 }}>
-            {notes.landuse === 'loading…' ? 'land use loading…' : (notes.infra || notes.hydro || notes.landuse)}
+            {notes.infra || notes.hydro || notes.landuse}
           </div>
+        )}
+        {notes.landuse === 'loading…' && (
+          <div className="lg-row faint" style={{ marginTop: 6 }}>land use loading…</div>
         )}
       </div>
     </div>

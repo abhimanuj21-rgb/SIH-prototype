@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout.jsx'
+import LandingPage from './pages/LandingPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import ExplorerPage from './pages/ExplorerPage.jsx'
 import IntelligencePage from './pages/IntelligencePage.jsx'
@@ -12,8 +13,10 @@ import OfficialDataAccessPage from './pages/OfficialDataAccessPage.jsx'
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<Layout />}>
-        <Route index element={<DashboardPage />} />
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/app" element={<Layout />}>
+        <Route index element={<Navigate to="/app/dashboard" replace />} />
+        <Route path="dashboard" element={<DashboardPage />} />
         <Route path="explorer" element={<ExplorerPage />} />
         <Route path="intelligence" element={<IntelligencePage />} />
         <Route path="history" element={<HistoryPage />} />
@@ -21,8 +24,8 @@ export default function App() {
         <Route path="data-registry" element={<DataRegistryPage />} />
         <Route path="data-quality" element={<DataQualityPage />} />
         <Route path="official-data-access" element={<OfficialDataAccessPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

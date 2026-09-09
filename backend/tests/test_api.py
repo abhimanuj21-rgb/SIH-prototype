@@ -83,6 +83,18 @@ def test_site_context_rejects_outside_aoi(client):
     assert r["available"] is False
 
 
+def test_infrastructure_evidence_splits_hospital_and_clinic(client):
+    r = client.post("/api/v1/evidence/location", json=CORE).json()
+    infra = next((v for v in r["verified_evidence"] if v["topic"] == "infrastructure"), None)
+    if infra is None:
+        return  # infra layer not warmed in this environment; other tests cover it
+    val = infra["value"]
+    for k in ("distance_to_hospital_m", "distance_to_clinic_or_hospital_m",
+              "distance_to_school_m", "distance_to_school_or_college_m",
+              "distance_to_railway_station_m"):
+        assert k in val
+
+
 def test_evidence_report_is_descriptive(client):
     r = client.post("/api/v1/evidence/report", json=CORE).json()
     assert r["report_type"] == "location_evidence"

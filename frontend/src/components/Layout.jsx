@@ -1,33 +1,34 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import api from '../services/api.js'
 
 const NAV = [
   { group: 'Explore', items: [
-    ['/', 'Dashboard', '▚', true],
-    ['/explorer', 'Explorer', '🗺'],
-    ['/intelligence', 'Land Intelligence', '◎'],
+    ['/app/dashboard', 'Dashboard', '▚'],
+    ['/app/explorer', 'Explorer', '🗺'],
+    ['/app/intelligence', 'Land Intelligence', '◎'],
   ]},
   { group: 'Context', items: [
-    ['/history', 'History', '↺'],
-    ['/climate', 'Climate', '☁'],
+    ['/app/history', 'History', '↺'],
+    ['/app/climate', 'Climate', '☁'],
   ]},
   { group: 'Data governance', items: [
-    ['/data-registry', 'Data Registry', '▤'],
-    ['/data-quality', 'Data Quality', '✓'],
-    ['/official-data-access', 'Official Data Access', '⚿'],
+    ['/app/data-registry', 'Data Registry', '▤'],
+    ['/app/data-quality', 'Data Quality', '✓'],
+    ['/app/official-data-access', 'Official Data Access', '⚿'],
   ]},
 ]
 
 const TITLES = {
-  '/': 'Dashboard', '/explorer': 'Explorer', '/intelligence': 'Land Intelligence',
-  '/history': 'History', '/climate': 'Climate', '/data-registry': 'Data Registry',
-  '/data-quality': 'Data Quality', '/official-data-access': 'Official Data Access',
+  dashboard: 'Dashboard', explorer: 'Explorer', intelligence: 'Land Intelligence',
+  history: 'History', climate: 'Climate', 'data-registry': 'Data Registry',
+  'data-quality': 'Data Quality', 'official-data-access': 'Official Data Access',
 }
 
 export default function Layout() {
   const [health, setHealth] = useState('unknown')
   const { pathname } = useLocation()
+  const slug = pathname.split('/').pop()
 
   useEffect(() => {
     let alive = true
@@ -38,19 +39,19 @@ export default function Layout() {
   return (
     <div className="app">
       <aside className="app__sidebar">
-        <div className="app__brand">
+        <Link to="/" className="app__brand">
           <span className="mark">◧</span>
           <span>
             National Digital Platform
             <small>Land governance &amp; research · Madurai prototype</small>
           </span>
-        </div>
+        </Link>
         <nav className="nav">
           {NAV.map((sec) => (
             <div key={sec.group}>
               <div className="nav__group">{sec.group}</div>
-              {sec.items.map(([to, label, ic, end]) => (
-                <NavLink key={to} to={to} end={end}>
+              {sec.items.map(([to, label, ic]) => (
+                <NavLink key={to} to={to}>
                   <span className="ic">{ic}</span>{label}
                 </NavLink>
               ))}
@@ -61,7 +62,7 @@ export default function Layout() {
 
       <header className="app__header">
         <div className="crumb">
-          {TITLES[pathname] || 'Land Intelligence'} <span>· evidence-first · descriptive only</span>
+          {TITLES[slug] || 'Land Intelligence'} <span>· evidence-first · descriptive only</span>
         </div>
         <span className="pill">
           <span className={`status-dot ${health}`} />

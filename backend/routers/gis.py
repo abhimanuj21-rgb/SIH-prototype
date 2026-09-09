@@ -89,7 +89,8 @@ def infrastructure_osm(refresh: bool = False):
                 "type": "Feature",
                 "geometry": {"type": "LineString", "coordinates": coords},
                 "properties": {"kind": "road", "name": tags.get("name", ""),
-                               "osm_id": e.get("id"), "highway": tags.get("highway", "")},
+                               "osm_id": e.get("id"), "osm_type": "way",
+                               "highway": tags.get("highway", "")},
             })
             continue
         lat_, lon_ = e.get("lat"), e.get("lon")
@@ -98,14 +99,22 @@ def infrastructure_osm(refresh: bool = False):
             lat_, lon_ = c.get("lat"), c.get("lon")
         if lat_ is None:
             continue
-        kind = ("hospital" if tags.get("amenity") in ("hospital", "clinic") else
-                "education" if tags.get("amenity") in ("school", "college", "university") else
-                "rail_station" if tags.get("railway") == "station" else "other")
+        amenity = tags.get("amenity", "")
+        railway = tags.get("railway", "")
+        # Keep OSM's own distinction: a "clinic" (single practice) is not a
+        # "hospital". A "college"/"university" is not a "school".
+        kind = ({"hospital": "hospital", "clinic": "clinic",
+                 "school": "school", "college": "college",
+                 "university": "college"}.get(amenity)
+                or ("rail_station" if railway == "station" else "other"))
         feats.append({
             "type": "Feature",
             "geometry": {"type": "Point", "coordinates": [lon_, lat_]},
-            "properties": {"kind": kind, "name": tags.get("name", ""),
-                           "osm_id": e.get("id")},
+            "properties": {"kind": kind,
+                           "name": tags.get("name") or tags.get("name:en") or "",
+                           "osm_id": e.get("id"), "osm_type": e.get("type", "node"),
+                           "osm_tag": f"amenity={amenity}" if amenity else f"railway={railway}",
+                           "operator": tags.get("operator", "")},
         })
     fc = {"type": "FeatureCollection", "features": feats,
           "properties": {"source": "OpenStreetMap via Overpass",

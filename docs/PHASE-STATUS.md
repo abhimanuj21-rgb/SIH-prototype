@@ -4,6 +4,29 @@ Built from scratch on 2026-09-08 following the development execution plan.
 The plan assumed an existing codebase with a blank-page bug; the target folder
 was empty, so Phase 1 became "build the app shell" rather than "debug" it.
 
+## Addendum (2026-09-09) — landing page, marker audit
+
+- **Marker data-quality fix.** Reported issue: "schools marked where there are
+  none" near the Teppakulam. Root cause: `amenity=clinic` was rendered
+  identically to `amenity=hospital` (coral dots that read yellow on
+  satellite), and there is genuinely *nothing* educational within 500 m of the
+  tank in OSM. Fixes: `hospital` / `clinic` / `school` / `college` are now
+  distinct kinds with distinct colours and honest legend labels; every marker
+  popup shows the real name, the raw OSM tag, operator, and a
+  `openstreetmap.org/{type}/{id}` "verify / fix on OSM" link; POI markers are
+  hidden below zoom 13 (a hint shows instead) so the city view isn't a blob;
+  white halo on every marker for contrast on any base map. Infra cache rebuilt
+  with `osm_type` / `osm_tag` / `operator` properties. Evidence now reports
+  `distance_to_hospital_m` and `distance_to_clinic_or_hospital_m` separately
+  (same for school / school-or-college).
+- **Landing page.** `/` is now a marketing/orientation page (hero with a
+  contour-texture backdrop, sample-evidence card, the six-stage pipeline with
+  a "you are here" marker on *Verified evidence*, live registry numbers, a
+  "what you can check" grid, data-governance cards, footer). The app shell
+  moved under `/app/*` (`/app/dashboard`, `/app/explorer`, …). Warm-earth
+  secondary accent (`--land`), hover transitions, non-clipping page scroll.
+- Tests: 33 pytest cases green.
+
 ## Addendum (2026-09-08) — site context, base maps, UI pass
 
 - **Site character** (`POST /api/v1/evidence/site-context`, shown on Land

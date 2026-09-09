@@ -49,11 +49,11 @@ export default function DashboardPage() {
       <div className="card">
         <SectionTitle>Where to go</SectionTitle>
         <ul>
-          <li><Link to="/explorer">Explorer</Link> — Madurai map, satellite + OSM base layers, water / land-use / infrastructure overlays, click to pick a point</li>
-          <li><Link to="/intelligence">Land Intelligence</Link> — evidence report, site character (water · land use · development) and rule-based suitability for a point</li>
-          <li><Link to="/data-registry">Data Registry</Link> — all 26 datasets with provenance and analytical eligibility</li>
-          <li><Link to="/data-quality">Data Quality</Link> — automated audit of the registry</li>
-          <li><Link to="/official-data-access">Official Data Access</Link> — what is restricted and how to request it</li>
+          <li><Link to="/app/explorer">Explorer</Link> — Madurai map, satellite + OSM base layers, water / land-use / infrastructure overlays, click to pick a point</li>
+          <li><Link to="/app/intelligence">Land Intelligence</Link> — evidence report, site character (water · land use · development) and rule-based suitability for a point</li>
+          <li><Link to="/app/data-registry">Data Registry</Link> — all 26 datasets with provenance and analytical eligibility</li>
+          <li><Link to="/app/data-quality">Data Quality</Link> — automated audit of the registry</li>
+          <li><Link to="/app/official-data-access">Official Data Access</Link> — what is restricted and how to request it</li>
         </ul>
       </div>
 

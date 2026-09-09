@@ -49,7 +49,7 @@ export default function ExplorerPage() {
         <div className="card__head">
           <h3>Selected coordinate</h3>
           {picked && (
-            <button onClick={() => navigate('/intelligence', { state: picked })}>
+            <button onClick={() => navigate('/app/intelligence', { state: picked })}>
               Open Land Intelligence →
             </button>
           )}
