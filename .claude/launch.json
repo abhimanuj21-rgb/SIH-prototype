@@ -3,15 +3,15 @@
   "configurations": [
     {
       "name": "backend",
-      "runtimeExecutable": "backend/.venv/Scripts/python.exe",
+      "runtimeExecutable": "C:\\Users\\Abhinav\\Downloads\\backup\\SIH-prototype\\backend\\.venv\\Scripts\\python.exe",
       "runtimeArgs": ["-m", "uvicorn", "main:app", "--reload", "--port", "8000"],
       "cwd": "backend",
       "port": 8000
     },
     {
       "name": "frontend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "C:\\Windows\\System32\\cmd.exe",
+      "runtimeArgs": ["/c", "C:\\Users\\Abhinav\\Downloads\\backup\\SIH-prototype\\frontend\\dev-start.cmd"],
       "cwd": "frontend",
       "port": 5173
     }
