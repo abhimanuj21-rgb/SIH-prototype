@@ -1,7 +1,7 @@
-# Netlify hosts the React website. The Python API runs separately (Render —
-# see render.yaml) and the site reaches it through VITE_API_BASE, which you set
-# in Netlify: Site configuration → Environment variables →
-#   VITE_API_BASE = https://<your-render-service>.onrender.com/api/v1
+# Netlify hosts the React website. The Python API runs separately on Render
+# (see render.yaml); VITE_API_BASE below is baked into the site at build time
+# so the browser calls that API directly. Change it here if the Render
+# address ever changes, then push — Netlify rebuilds on every push.
 [build]
   base = "frontend"
   command = "npm ci && npm run build"
@@ -9,6 +9,7 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  VITE_API_BASE = "https://sih-land-intelligence.onrender.com/api/v1"
 
 # Single-page app: every route (e.g. a shared /app/intelligence?lat=..&lon=..
 # link) serves index.html and React Router takes over.
