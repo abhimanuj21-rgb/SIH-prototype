@@ -59,6 +59,12 @@ def _get_json(url: str, params, timeout: float = _TIMEOUT, headers=None, attempt
     raise last  # type: ignore[misc]
 
 
+def _http_reason(exc: Exception) -> str:
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    return ("HTTP 429 (rate-limited)" if status == 429 else f"HTTP {status}" if status
+            else exc.__class__.__name__)
+
+
 def _gate(ds: str) -> dict | None:
     if not reg.can_use_for_analysis(ds):
         return {"ok": False, "reason": f"{ds} not analytically eligible"}
@@ -89,14 +95,27 @@ def _terrain(lat: float, lon: float) -> dict:
     prof_d = [i * 100 for i in range(-10, 11)]
     pts += [_offset(lat, lon, 0, d) for d in prof_d]     # west -> east
     pts += [_offset(lat, lon, d, 0) for d in prof_d]     # south -> north
+    # Copernicus GLO-90 via Open-Meteo first; SRTM 90 m via OpenTopoData if
+    # Open-Meteo refuses (shared cloud IPs can hit its free limit).
+    z, source, dataset, primary_err = [], "Open-Meteo Elevation API (Copernicus DEM GLO-90)", \
+        "open_meteo_elevation", None
     try:
         z = _get_json("https://api.open-meteo.com/v1/elevation", {
             "latitude": ",".join(f"{p[0]:.5f}" for p in pts),
             "longitude": ",".join(f"{p[1]:.5f}" for p in pts)}).get("elevation") or []
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "reason": f"Open-Meteo elevation unreachable: {exc.__class__.__name__}"}
+        primary_err = f"Open-Meteo elevation unreachable: {_http_reason(exc)}"
+    if (len(z) != len(pts) or any(v is None for v in z)) and reg.can_use_for_analysis("opentopodata_srtm"):
+        try:
+            res = _get_json("https://api.opentopodata.org/v1/srtm90m", {
+                "locations": "|".join(f"{p[0]:.5f},{p[1]:.5f}" for p in pts)}).get("results") or []
+            z = [r.get("elevation") for r in res]
+            source, dataset = "OpenTopoData (SRTM 90 m)", "opentopodata_srtm"
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "reason": f"{primary_err or 'Open-Meteo elevation incomplete'}; "
+                                           f"backup OpenTopoData unreachable: {_http_reason(exc)}"}
     if len(z) != len(pts) or any(v is None for v in z):
-        return {"ok": False, "reason": "Elevation service returned incomplete values"}
+        return {"ok": False, "reason": primary_err or "Elevation service returned incomplete values"}
 
     z0, zn, zs, ze, zw = z[:5]
     ring_z = z[5:21]
@@ -142,8 +161,8 @@ def _terrain(lat: float, lon: float) -> dict:
             "profile_south_north": [{"offset_m": d, "elevation_m": v} for d, v in zip(prof_d, sn)],
         },
         "provenance": {
-            "dataset": "open_meteo_elevation",
-            "source": "Open-Meteo Elevation API (Copernicus DEM GLO-90)",
+            "dataset": dataset,
+            "source": source,
             "resolution": "90 m DEM; slope over 200 m baseline",
             "retrieved": date.today().isoformat(),
             "confidence": "medium",

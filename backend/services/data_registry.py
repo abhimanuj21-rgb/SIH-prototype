@@ -85,7 +85,7 @@ def _ds(
     }
 
 
-# --- The 42 core datasets --------------------------------------------------
+# --- The 44 core datasets --------------------------------------------------
 DATASETS: list[dict] = [
     # --- Base / boundary ---
     _ds("madurai_boundary", "Madurai administrative boundary", "Boundary",
@@ -218,6 +218,27 @@ DATASETS: list[dict] = [
                     "the full rasters for map layers (esri_lulc_2017 / 2024) are "
                     "still pending local acquisition.",
         acquisition="HTTPS getSamples on ic.imagery1.arcgis.com, no key."),
+
+    _ds("met_norway_forecast", "MET Norway current weather & forecast (backup)", "Climate",
+        Status.AVAILABLE,
+        source="MET Norway Locationforecast 2.0 API",
+        authority="Norwegian Meteorological Institute (ECMWF-based global forecast)",
+        acquisition_date="live", last_updated="hourly",
+        license="CC-BY 4.0 / NLOD (MET Norway)",
+        limitations="Backup when Open-Meteo is unavailable. Global model value for "
+                    "the grid cell; no rain-probability outside the Nordics; UV is the "
+                    "clear-sky index.",
+        acquisition="HTTPS GET to api.met.no with an identifying User-Agent, no key."),
+    _ds("opentopodata_srtm", "SRTM 90 m elevation via OpenTopoData (backup)", "Terrain",
+        Status.AVAILABLE,
+        source="OpenTopoData public API — NASA SRTM 90 m",
+        authority="NASA / USGS (SRTM); served by OpenTopoData",
+        acquisition_date="live", last_updated="static DEM (2000 mission)",
+        license="Public domain (SRTM); OpenTopoData free public API",
+        limitations="Backup when Open-Meteo elevation is unavailable. SRTM is older "
+                    "(2000) than Copernicus and a surface model; public API allows "
+                    "~1 request/s and 1000/day.",
+        acquisition="HTTPS GET to api.opentopodata.org/v1/srtm90m, no key."),
 
     # --- Point-sampled open APIs (keyless, live, cached per ~100 m) ---
     _ds("open_meteo_elevation", "Copernicus DEM GLO-90 elevation (via Open-Meteo)", "Terrain",
@@ -497,7 +518,7 @@ DATASETS: list[dict] = [
 
 _BY_ID = {d["id"]: d for d in DATASETS}
 
-assert len(DATASETS) == 42, f"expected 42 datasets, found {len(DATASETS)}"
+assert len(DATASETS) == 44, f"expected 44 datasets, found {len(DATASETS)}"
 
 
 def _applies_to_city(d: dict, city: str, state: Optional[str]) -> bool:

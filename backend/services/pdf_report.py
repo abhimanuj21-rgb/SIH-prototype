@@ -640,7 +640,8 @@ def _land_details(det: dict, st: dict) -> list:
     m = lw.get("model") or {}
     if m.get("available"):
         cur, obs, ag = m["current"], lw.get("observed") or {}, lw.get("agreement")
-        line = (f"{cur['sky']['label']}, {cur['temperature_c']} °C (feels like {cur['feels_like_c']} °C), "
+        feels = f" (feels like {cur['feels_like_c']} °C)" if cur.get("feels_like_c") is not None else ""
+        line = (f"{cur['sky']['label']}, {cur['temperature_c']} °C{feels}, "
                 f"humidity {cur['humidity_pct']}%, wind {cur['wind_kmh']} km/h {cur['wind_from'] or ''}, "
                 f"rain now {cur['precipitation_mm']} mm — model value at {cur['time_local'][11:]} local time.")
         if obs.get("available"):
@@ -654,16 +655,17 @@ def _land_details(det: dict, st: dict) -> list:
         rows = [[Paragraph(f"<b>{_clean(d['weekday'])}</b>", st["cell"]),
                  Paragraph(_clean(d["sky"]["label"]), st["cell"]),
                  Paragraph(f"{d['max_c']:.0f}° / {d['min_c']:.0f}°", st["cell"]),
-                 Paragraph(f"{d['rain_chance_pct'] if d['rain_chance_pct'] is not None else '—'}% · "
-                           f"{d['rain_mm']} mm", st["cell"])]
+                 Paragraph((f"{d['rain_chance_pct']}% · " if d.get("rain_chance_pct") is not None else "")
+                           + f"{d['rain_mm']} mm", st["cell"])]
                 for d in m.get("forecast_7d", [])]
         out += [KeepTogether([
             sub(f"Weather when this report was made ({_clean(lw.get('fetched_at', ''))})"),
             Paragraph(_clean(line), st["small"]), Spacer(1, 3),
             _grid_table([[Paragraph(h, st["cellb"]) for h in ("Day", "Sky", "High / low", "Rain chance · amount")]]
                         + rows, [22 * mm, 50 * mm, 30 * mm, CONTENT_W - 102 * mm]),
-            Paragraph("Model: Open-Meteo best-match forecast. Measured: NOAA Aviation Weather "
-                      "Center METAR (airport station).", st["tiny"])]), Spacer(1, 6)]
+            Paragraph(_clean(f"Model: {(m.get('provenance') or {}).get('source', 'Open-Meteo')}. "
+                             "Measured: NOAA Aviation Weather Center METAR (airport station)."),
+                      st["tiny"])]), Spacer(1, 6)]
 
     # climate
     c = det.get("climate") or {}

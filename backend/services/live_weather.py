@@ -73,6 +73,16 @@ def _get(url, params, headers=None, timeout=15.0):
     raise last  # type: ignore[misc]
 
 
+def http_reason(exc: Exception) -> str:
+    """'HTTP 429 (rate-limited)' rather than a bare exception class name."""
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == 429:
+        return "HTTP 429 (rate-limited)"
+    if status:
+        return f"HTTP {status}"
+    return exc.__class__.__name__
+
+
 def _uv_note(uv):
     if uv is None:
         return None
@@ -90,6 +100,20 @@ def _aqi_note(aqi):
 
 # --- model: current + forecast ------------------------------------------------
 def _forecast(lat, lon) -> dict:
+    """Open-Meteo first; MET Norway if Open-Meteo refuses (e.g. a shared cloud
+    IP over its free limit). Either way the source is named in provenance."""
+    primary = _forecast_open_meteo(lat, lon)
+    if primary.get("available"):
+        return primary
+    backup = _forecast_metno(lat, lon)
+    if backup.get("available"):
+        backup["provenance"]["fallback_reason"] = primary.get("reason")
+        return backup
+    return {"available": False,
+            "reason": f"{primary.get('reason')}; backup {backup.get('reason')}"}
+
+
+def _forecast_open_meteo(lat, lon) -> dict:
     if not reg.can_use_for_analysis("open_meteo_forecast"):
         return {"available": False, "reason": "open_meteo_forecast not analytically eligible"}
     try:
@@ -106,7 +130,7 @@ def _forecast(lat, lon) -> dict:
             "forecast_days": 7, "forecast_hours": 24})
     except Exception as exc:  # noqa: BLE001
         return {"available": False,
-                "reason": f"Open-Meteo forecast unreachable: {exc.__class__.__name__}"}
+                "reason": f"Open-Meteo forecast unreachable: {http_reason(exc)}"}
     c, h, d = j.get("current") or {}, j.get("hourly") or {}, j.get("daily") or {}
     if c.get("temperature_2m") is None:
         return {"available": False, "reason": "Forecast service returned no current values"}
@@ -151,6 +175,128 @@ def _forecast(lat, lon) -> dict:
                            "source": "Open-Meteo Forecast API (best-match models)",
                            "updated": "every 15 minutes",
                            "note": "Model value for the ~km grid cell, not a site thermometer."}}
+
+
+# --- backup: MET Norway Locationforecast (keyless, global, ECMWF-based) -------
+_MET_SYMBOLS = [  # (symbol_code prefix, label, icon, severity)
+    ("heavyrainandthunder", "Thunderstorm with heavy rain", "⛈️", 9),
+    ("rainandthunder", "Thunderstorm", "⛈️", 8), ("rainshowersandthunder", "Thunderstorm", "⛈️", 8),
+    ("lightrainandthunder", "Thunderstorm", "⛈️", 8),
+    ("lightrainshowersandthunder", "Thunderstorm", "⛈️", 8),
+    ("heavyrainshowersandthunder", "Thunderstorm with heavy rain", "⛈️", 9),
+    ("heavyrainshowers", "Heavy showers", "🌧️", 7), ("heavyrain", "Heavy rain", "🌧️", 7),
+    ("rainshowers", "Showers", "🌦️", 6), ("rain", "Rain", "🌧️", 6),
+    ("lightrainshowers", "Light showers", "🌦️", 5), ("lightrain", "Light rain", "🌦️", 5),
+    ("fog", "Fog", "🌫️", 3), ("cloudy", "Overcast", "☁️", 2),
+    ("partlycloudy", "Partly cloudy", "⛅", 1), ("fair", "Mainly clear", "🌤️", 1),
+    ("clearsky", "Clear sky", "☀️", 0),
+]
+
+
+def _met_sky(symbol: str | None) -> dict:
+    code = (symbol or "").split("_")[0]
+    for prefix, label, icon, sev in _MET_SYMBOLS:
+        if code == prefix:
+            return {"code": code, "label": label, "icon": icon, "severity": sev}
+    return {"code": code or None, "label": code.replace("and", " and ").capitalize() or "Unknown",
+            "icon": "🌡️", "severity": 4}
+
+
+def _forecast_metno(lat, lon) -> dict:
+    if not reg.can_use_for_analysis("met_norway_forecast"):
+        return {"available": False, "reason": "met_norway_forecast not analytically eligible"}
+    try:
+        j = _get("https://api.met.no/weatherapi/locationforecast/2.0/complete",
+                 {"lat": f"{lat:.4f}", "lon": f"{lon:.4f}"},
+                 headers={"User-Agent": "NDP-land-evidence-prototype/0.1 "
+                                        "github.com/abhimanuj21-rgb/SIH-prototype"})
+    except Exception as exc:  # noqa: BLE001
+        return {"available": False, "reason": f"MET Norway unreachable: {http_reason(exc)}"}
+    ts = (j.get("properties") or {}).get("timeseries") or []
+    if not ts:
+        return {"available": False, "reason": "MET Norway returned no forecast steps"}
+
+    def local(t):  # "2026-09-24T16:00:00Z" -> IST datetime
+        return datetime.fromisoformat(t.replace("Z", "+00:00")).astimezone(IST)
+
+    d0 = ts[0]["data"]
+    ins = d0["instant"]["details"]
+    n1 = d0.get("next_1_hours") or {}
+    kmh = lambda v: None if v is None else round(v * 3.6, 1)  # noqa: E731
+    current = {
+        "time_local": local(ts[0]["time"]).strftime("%Y-%m-%dT%H:%M"),
+        "temperature_c": ins.get("air_temperature"),
+        "feels_like_c": ins.get("apparent_air_temperature"),
+        "humidity_pct": None if ins.get("relative_humidity") is None else round(ins["relative_humidity"]),
+        "dew_point_c": ins.get("dew_point_temperature"),
+        "precipitation_mm": (n1.get("details") or {}).get("precipitation_amount"),
+        "cloud_cover_pct": None if ins.get("cloud_area_fraction") is None else round(ins["cloud_area_fraction"]),
+        "wind_kmh": kmh(ins.get("wind_speed")),
+        "wind_gust_kmh": kmh(ins.get("wind_speed_of_gust")),
+        "wind_from": _compass(ins.get("wind_from_direction")),
+        "pressure_hpa": ins.get("air_pressure_at_sea_level"),
+        "uv_index": ins.get("ultraviolet_index_clear_sky"),
+        "uv_note": _uv_note(ins.get("ultraviolet_index_clear_sky")),
+        "is_day": None,
+        "sky": _met_sky((n1.get("summary") or {}).get("symbol_code")),
+    }
+    hourly = []
+    for step in ts:
+        n = step["data"].get("next_1_hours")
+        if not n or len(hourly) >= 24:
+            continue
+        hourly.append({"time": local(step["time"]).strftime("%H:%M"),
+                       "temp_c": step["data"]["instant"]["details"].get("air_temperature"),
+                       "rain_chance_pct": None,
+                       "rain_mm": (n.get("details") or {}).get("precipitation_amount"),
+                       "sky": _met_sky((n.get("summary") or {}).get("symbol_code"))["icon"]})
+    days: dict[str, dict] = {}
+    for step in ts:
+        lt = local(step["time"])
+        day = days.setdefault(lt.date().isoformat(), {"temps": [], "rain": 0.0, "sky": [],
+                                                       "uv": [], "wind": [], "hours": set()})
+        det = step["data"]["instant"]["details"]
+        if det.get("air_temperature") is not None:
+            day["temps"].append(det["air_temperature"])
+        if det.get("ultraviolet_index_clear_sky") is not None:
+            day["uv"].append(det["ultraviolet_index_clear_sky"])
+        if det.get("wind_speed") is not None:
+            day["wind"].append(det["wind_speed"])
+        day["hours"].add(lt.hour)
+        nxt = step["data"].get("next_1_hours") or step["data"].get("next_6_hours")
+        if nxt:
+            day["rain"] += (nxt.get("details") or {}).get("precipitation_amount") or 0
+            n6 = step["data"].get("next_6_hours") or {}
+            for k in ("air_temperature_max", "air_temperature_min"):
+                if (n6.get("details") or {}).get(k) is not None:
+                    day["temps"].append(n6["details"][k])
+            day["sky"].append(_met_sky((nxt.get("summary") or {}).get("symbol_code")))
+    daily = []
+    for i, (date_s, d) in enumerate(sorted(days.items())[:7]):
+        if not d["temps"]:
+            continue
+        worst = max(d["sky"], key=lambda s: s["severity"]) if d["sky"] else _met_sky(None)
+        daily.append({
+            "date": date_s,
+            "weekday": "Today" if i == 0 else datetime.fromisoformat(date_s).strftime("%a"),
+            "sky": {k: worst[k] for k in ("code", "label", "icon")},
+            "max_c": round(max(d["temps"]), 1), "min_c": round(min(d["temps"]), 1),
+            "rain_mm": round(d["rain"], 1), "rain_chance_pct": None,
+            "uv_max": round(max(d["uv"]), 1) if d["uv"] else None,
+            "wind_max_kmh": kmh(max(d["wind"])) if d["wind"] else None,
+            "sunrise": "", "sunset": "",
+            # today's remaining hours only, if the forecast starts in the afternoon
+            "partial": not any(10 <= h <= 16 for h in d["hours"]),
+        })
+    current["sky"] = {k: current["sky"][k] for k in ("code", "label", "icon")}
+    return {"available": True, "current": current, "next_24h": hourly, "forecast_7d": daily,
+            "grid_elevation_m": None,
+            "provenance": {"dataset": "met_norway_forecast",
+                           "source": "MET Norway Locationforecast 2.0 (ECMWF-based)",
+                           "updated": "hourly",
+                           "note": "Backup source, used because Open-Meteo did not answer. "
+                                   "Model value for the grid cell; UV is the clear-sky index; "
+                                   "no rain-probability field outside the Nordics."}}
 
 
 # --- live air ----------------------------------------------------------------
@@ -240,7 +386,10 @@ def _vs_normal(lat, lon, fc: dict) -> dict:
     clim = ee._climate_evidence(lat, lon)
     if not clim.get("ok") or not clim.get("detail"):
         return {"available": False, "reason": "10-year climate normals unavailable"}
-    today = fc["forecast_7d"][0]
+    days = fc["forecast_7d"]
+    today = next((d for d in days if not d.get("partial")), days[0])
+    which = "Today's" if today is days[0] else "Tomorrow's" if len(days) > 1 and today is days[1] \
+        else f"{today['weekday']}'s"
     month = datetime.fromisoformat(today["date"]).strftime("%b")
     norm = next((m for m in clim["detail"]["monthly"] if m["month"] == month), None)
     if not norm or norm.get("temp_max_c") is None or today.get("max_c") is None:
@@ -251,7 +400,7 @@ def _vs_normal(lat, lon, fc: dict) -> dict:
     return {"available": True, "month": month, "today_max_c": today["max_c"],
             "normal_max_c": norm["temp_max_c"], "difference_c": diff,
             "normal_month_rain_mm": norm.get("rain_mm"),
-            "summary": f"Today's forecast high of {today['max_c']} °C is {word} the "
+            "summary": f"{which} forecast high of {today['max_c']} °C is {word} the "
                        f"{month} normal of {norm['temp_max_c']} °C "
                        f"({'+' if diff > 0 else ''}{diff} °C, 10-year ERA5)."}
 

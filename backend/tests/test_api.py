@@ -15,8 +15,8 @@ def test_health(client):
 
 def test_registry_list(client):
     body = client.get("/api/v1/data-registry/").json()
-    assert body["count"] == 42
-    assert len(body["datasets"]) == 42
+    assert body["count"] == 44
+    assert len(body["datasets"]) == 44
 
 
 def test_registry_filter_by_city(client):
@@ -48,8 +48,8 @@ def test_registry_detail_404(client):
 # --- data quality ---------------------------------------------------
 def test_quality_audit_all_pass(client):
     a = client.get("/api/v1/data-quality/audit").json()
-    assert a["total"] == 42
-    assert a["passed"] == 42
+    assert a["total"] == 44
+    assert a["passed"] == 44
     assert a["failed"] == 0
     assert a["demo_data_leak"] is False
     assert a["provenance_complete_all"] is True
@@ -185,7 +185,7 @@ def test_export_json_and_manifest(client):
                    params={"latitude": CORE["latitude"], "longitude": CORE["longitude"]})
     assert j.status_code == 200 and j.json()["report_type"] == "location_evidence"
     m = client.get("/api/v1/evidence/export/manifest").json()
-    assert len(m["datasets"]) == 42
+    assert len(m["datasets"]) == 44
     assert m["analytical_gate"].startswith("status == AVAILABLE")
 
 

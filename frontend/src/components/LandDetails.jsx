@@ -349,7 +349,7 @@ function LiveWeather({ loc }) {
           <span className="lw__icon" aria-hidden>{c.sky.icon}</span>
           <div>
             <strong>{c.temperature_c}°C</strong>
-            <span>{c.sky.label} · feels like {c.feels_like_c}°C</span>
+            <span>{c.sky.label}{c.feels_like_c != null && <> · feels like {c.feels_like_c}°C</>}</span>
           </div>
         </div>
         <div className="lw__grid">
@@ -391,9 +391,15 @@ function LiveWeather({ loc }) {
       {view === '24h' && <>
         <Columns data={m.next_24h} valueKey="temp_c" labelKey="time" unit="°C" color={C.second} height={140}
                  fmt={(t) => `${t} °C`} />
-        <div className="ld-sub">Chance of rain</div>
-        <Columns data={m.next_24h} valueKey="rain_chance_pct" labelKey="time" unit="%" height={110}
-                 fmt={(p) => `${p}% chance of rain`} />
+        {m.next_24h.some((h) => h.rain_chance_pct != null) ? <>
+          <div className="ld-sub">Chance of rain</div>
+          <Columns data={m.next_24h} valueKey="rain_chance_pct" labelKey="time" unit="%" height={110}
+                   fmt={(p) => `${p}% chance of rain`} />
+        </> : <>
+          <div className="ld-sub">Expected rain (mm per hour)</div>
+          <Columns data={m.next_24h} valueKey="rain_mm" labelKey="time" unit="mm" height={110}
+                   labelEvery={3} fmt={(v) => `${v} mm`} />
+        </>}
       </>}
       {view === '7d' && (
         <div className="lw__week">
@@ -403,7 +409,7 @@ function LiveWeather({ loc }) {
               <span className="lw__dicon" title={d.sky.label}>{d.sky.icon}</span>
               <span className="lw__hi">{Math.round(d.max_c)}°</span>
               <span className="lw__lo">{Math.round(d.min_c)}°</span>
-              <span className="lw__rain">💧 {d.rain_chance_pct ?? '—'}%</span>
+              {d.rain_chance_pct != null && <span className="lw__rain">💧 {d.rain_chance_pct}%</span>}
               <span className="faint">{d.rain_mm} mm</span>
               <span className="faint">UV {d.uv_max ?? '—'}</span>
             </div>
@@ -411,7 +417,8 @@ function LiveWeather({ loc }) {
         </div>
       )}
       <Src>
-        Current & forecast: Open-Meteo best-match weather models (a ~km grid value, not a site thermometer).
+        Current & forecast: {m.provenance?.source || 'Open-Meteo best-match weather models'} (a ~km grid value, not a site thermometer).
+        {m.provenance?.fallback_reason && <> Backup used because the primary source failed ({m.provenance.fallback_reason}).</>}
         Measured: NOAA Aviation Weather Center METAR (IMD airport stations). Live air: CAMS via Open-Meteo.
       </Src>
     </div>
