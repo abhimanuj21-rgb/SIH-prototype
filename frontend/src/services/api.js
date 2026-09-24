@@ -3,7 +3,10 @@
 // with a useful message — no silent failures, no fabricated fallbacks.
 
 const BASE = import.meta.env.VITE_API_BASE || '/api/v1'
-const DEFAULT_TIMEOUT = 30000
+const DEFAULT_TIMEOUT = 60000 // free hosting can take ~a minute to wake up
+const API_MISSING = 'This website is not connected to its data server. If this is a Netlify ' +
+  'deploy, set VITE_API_BASE (e.g. https://<your-render-service>.onrender.com/api/v1) under ' +
+  'Site configuration → Environment variables, then redeploy.'
 
 async function request(path, { method = 'GET', body, timeout = DEFAULT_TIMEOUT } = {}) {
   const ctrl = new AbortController()
@@ -16,6 +19,9 @@ async function request(path, { method = 'GET', body, timeout = DEFAULT_TIMEOUT }
       signal: ctrl.signal,
     })
     const text = await res.text()
+    // A web page instead of JSON means this site has no API behind /api —
+    // e.g. a static host (Netlify) built without VITE_API_BASE.
+    if (/^\s*</.test(text)) throw new Error(API_MISSING)
     const data = text ? JSON.parse(text) : null
     if (!res.ok) {
       const detail = data?.detail || data?.error || res.statusText
@@ -23,9 +29,12 @@ async function request(path, { method = 'GET', body, timeout = DEFAULT_TIMEOUT }
     }
     return data
   } catch (err) {
-    if (err.name === 'AbortError') throw new Error(`Request timed out: ${path}`)
+    if (err.name === 'AbortError')
+      throw new Error(`The server took too long to answer (${path}). If it was asleep it is waking up — try again in a minute.`)
     if (err.message === 'Failed to fetch')
-      throw new Error('Cannot reach the API. Is the backend running on :8000?')
+      throw new Error(import.meta.env.VITE_API_BASE
+        ? `Cannot reach the API at ${BASE}. It may be waking up (free hosting sleeps when idle) — try again in a minute.`
+        : 'Cannot reach the API. Is the backend running on :8000?')
     throw err
   } finally {
     clearTimeout(timer)
