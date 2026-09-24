@@ -43,7 +43,7 @@ export default function Layout() {
           <span className="mark">◧</span>
           <span>
             National Digital Platform
-            <small>Land governance &amp; research · Madurai prototype</small>
+            <small>Land governance &amp; research · Madurai, Bhopal &amp; Kovilpatti prototypes</small>
           </span>
         </Link>
         <nav className="nav">

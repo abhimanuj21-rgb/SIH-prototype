@@ -18,7 +18,7 @@ from services import data_registry as reg
 from services import evidence_engine as ev
 
 
-def extract_terrain_features(lat: float, lon: float) -> dict:
+def extract_terrain_features(lat: float, lon: float, city: str) -> dict:
     if not reg.can_use_for_analysis("copernicus_dem"):
         return {"available": False, "dataset": "copernicus_dem",
                 "reason": "Copernicus DEM not acquired; elevation/slope/aspect "
@@ -29,7 +29,7 @@ def extract_terrain_features(lat: float, lon: float) -> dict:
             "reason": "DEM sampler not yet implemented."}
 
 
-def extract_climate_features(lat: float, lon: float) -> dict:
+def extract_climate_features(lat: float, lon: float, city: str) -> dict:
     res = ev._climate_evidence(lat, lon)
     if not res.get("ok"):
         return {"available": False, "dataset": "open_meteo_climate",
@@ -48,7 +48,7 @@ def extract_climate_features(lat: float, lon: float) -> dict:
     }
 
 
-def extract_lulc_features(lat: float, lon: float) -> dict:
+def extract_lulc_features(lat: float, lon: float, city: str) -> dict:
     if not (reg.can_use_for_analysis("esri_lulc_2024")
             and reg.can_use_for_analysis("esri_lulc_2017")):
         return {"available": False, "dataset": "esri_lulc_2024",
@@ -58,8 +58,8 @@ def extract_lulc_features(lat: float, lon: float) -> dict:
             "reason": "LULC sampler not yet implemented."}
 
 
-def extract_infrastructure_features(lat: float, lon: float) -> dict:
-    res = ev._infrastructure_evidence(lat, lon)
+def extract_infrastructure_features(lat: float, lon: float, city: str) -> dict:
+    res = ev._infrastructure_evidence(lat, lon, city)
     if not res.get("ok"):
         return {"available": False, "dataset": "osm_infrastructure",
                 "reason": res.get("reason", "unavailable")}
@@ -129,7 +129,7 @@ def build_feature_vector(lat: float, lon: float) -> dict:
 
     blocks, available, missing = {}, [], []
     for name, fn in _EXTRACTORS.items():
-        b = fn(lat, lon)
+        b = fn(lat, lon, check["city"])
         v = validate_feature_block(b)
         b["_validation"] = v
         blocks[name] = b

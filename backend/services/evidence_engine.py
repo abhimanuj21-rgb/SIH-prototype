@@ -12,21 +12,24 @@ from __future__ import annotations
 
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import date
 from pathlib import Path
 
 import httpx
 
+from services import cities as city_registry
 from services import data_registry as reg
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
-# Prototype area of interest. Wider than the city core so district-edge
-# clicks still resolve, but callers are told when a point is outside the core.
-AOI = {"lat_min": 9.75, "lat_max": 10.15, "lon_min": 77.95, "lon_max": 78.35}
-CITY_CORE = {"lat_min": 9.86, "lat_max": 9.98, "lon_min": 78.06, "lon_max": 78.18}
+# Back-compat aliases for callers/tests that still reach for the Madurai AOI
+# directly. New code should resolve a city via cities.py instead.
+AOI = city_registry.CITIES["madurai"]["aoi"]
+CITY_CORE = city_registry.CITIES["madurai"]["city_core"]
 
-_HTTP_TIMEOUT = 8.0
+_HTTP_TIMEOUT = 15.0
+_LIVE_DEADLINE_S = 15.0  # max wait for all live sources in one report
 
 
 # --- coordinate handling ------------------------------------------------
@@ -38,17 +41,19 @@ def validate_coordinate(lat: float, lon: float) -> dict:
         return {"valid": False, "reason": "Latitude/longitude must be numbers."}
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):
         return {"valid": False, "reason": "Coordinate out of global range."}
-    in_aoi = (AOI["lat_min"] <= lat <= AOI["lat_max"]
-              and AOI["lon_min"] <= lon <= AOI["lon_max"])
-    if not in_aoi:
+    city = city_registry.resolve_city_for_point(lat, lon)
+    if city is None:
+        areas = ", ".join(c["label"] for c in city_registry.list_cities())
         return {
             "valid": False,
-            "reason": "Outside the Madurai prototype area of interest.",
-            "aoi": AOI,
+            "reason": f"Outside every prototype area of interest ({areas}).",
+            "cities": city_registry.list_cities(),
         }
-    in_core = (CITY_CORE["lat_min"] <= lat <= CITY_CORE["lat_max"]
-               and CITY_CORE["lon_min"] <= lon <= CITY_CORE["lon_max"])
-    return {"valid": True, "in_city_core": in_core, "lat": lat, "lon": lon}
+    core = city["city_core"]
+    in_core = (core["lat_min"] <= lat <= core["lat_max"]
+               and core["lon_min"] <= lon <= core["lon_max"])
+    return {"valid": True, "in_city_core": in_core, "lat": lat, "lon": lon,
+            "city": city["id"], "city_label": city["label"], "state": city["state"]}
 
 
 def _haversine_m(lat1, lon1, lat2, lon2) -> float:
@@ -82,16 +87,22 @@ def _climate_evidence(lat: float, lon: float) -> dict:
         "longitude": round(lon, 4),
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
-        "daily": "temperature_2m_mean,precipitation_sum",
+        "daily": "temperature_2m_mean,temperature_2m_max,precipitation_sum,"
+                 "shortwave_radiation_sum",
         "timezone": "auto",
     }
-    try:
-        with httpx.Client(timeout=_HTTP_TIMEOUT) as c:
-            r = c.get(url, params=params)
-            r.raise_for_status()
-            data = r.json()
-    except Exception as exc:  # noqa: BLE001 - degrade to gap, never fabricate
-        return {"ok": False, "reason": f"Open-Meteo unreachable: {exc.__class__.__name__}"}
+    data = None
+    for _attempt in (1, 2):  # one retry: a transient blip is not a data gap
+        try:
+            with httpx.Client(timeout=_HTTP_TIMEOUT) as c:
+                r = c.get(url, params=params)
+                r.raise_for_status()
+                data = r.json()
+            break
+        except Exception as exc:  # noqa: BLE001 - degrade to gap, never fabricate
+            err = exc
+    if data is None:
+        return {"ok": False, "reason": f"Open-Meteo unreachable: {err.__class__.__name__}"}
 
     daily = data.get("daily", {})
     temps = [t for t in daily.get("temperature_2m_mean", []) if t is not None]
@@ -100,16 +111,24 @@ def _climate_evidence(lat: float, lon: float) -> dict:
         return {"ok": False, "reason": "Open-Meteo returned no usable values"}
 
     years = max(1, len(precs) / 365.25)
+    tmax = [t for t in daily.get("temperature_2m_max", []) if t is not None]
+    sw = [s for s in daily.get("shortwave_radiation_sum", []) if s is not None]
+    value = {
+        "period": f"{start.isoformat()} to {end.isoformat()}",
+        "mean_temperature_c": round(sum(temps) / len(temps), 1),
+        "min_daily_mean_temp_c": round(min(temps), 1),
+        "max_daily_mean_temp_c": round(max(temps), 1),
+        "annual_precipitation_mm": round(sum(precs) / years, 0),
+        "wet_days_per_year": round(sum(1 for p in precs if p >= 1.0) / years, 0),
+    }
+    if tmax:
+        value["days_above_40c_per_year"] = int(round(sum(1 for t in tmax if t >= 40) / years))
+    if sw:  # MJ/m2/day -> kWh/m2/day
+        value["solar_kwh_m2_day"] = round(sum(sw) / len(sw) / 3.6, 2)
     result = {
         "ok": True,
-        "value": {
-            "period": f"{start.isoformat()} to {end.isoformat()}",
-            "mean_temperature_c": round(sum(temps) / len(temps), 1),
-            "min_daily_mean_temp_c": round(min(temps), 1),
-            "max_daily_mean_temp_c": round(max(temps), 1),
-            "annual_precipitation_mm": round(sum(precs) / years, 0),
-            "wet_days_per_year": round(sum(1 for p in precs if p >= 1.0) / years, 0),
-        },
+        "value": value,
+        "detail": _climate_detail(daily),
         "provenance": {
             "dataset": "open_meteo_climate",
             "source": "Open-Meteo Archive API (ERA5)",
@@ -120,6 +139,60 @@ def _climate_evidence(lat: float, lon: float) -> dict:
     }
     _CLIMATE_CACHE[ckey] = result
     return result
+
+
+def _climate_detail(daily: dict) -> dict:
+    """Monthly normals + rainfall per calendar year from the same daily series."""
+    times = daily.get("time", [])
+    cols = {k: daily.get(k, []) for k in ("temperature_2m_mean", "temperature_2m_max",
+                                           "precipitation_sum", "shortwave_radiation_sum")}
+    by_month: dict[int, dict[str, list]] = {m: {k: [] for k in cols} for m in range(1, 13)}
+    rain_month_year: dict[tuple[int, int], float] = {}
+    days_month_year: dict[tuple[int, int], int] = {}
+    rain_year: dict[int, list] = {}
+    for i, t in enumerate(times):
+        y, m = int(t[:4]), int(t[5:7])
+        for k, series in cols.items():
+            v = series[i] if i < len(series) else None
+            if v is not None:
+                by_month[m][k].append(v)
+        p = cols["precipitation_sum"][i] if i < len(cols["precipitation_sum"]) else None
+        if p is not None:
+            rain_month_year[(y, m)] = rain_month_year.get((y, m), 0.0) + p
+            days_month_year[(y, m)] = days_month_year.get((y, m), 0) + 1
+            rain_year.setdefault(y, []).append(p)
+
+    names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    monthly = []
+    for m in range(1, 13):
+        # whole months only — the 10-year window starts/ends mid-month
+        totals = [v for (y, mm), v in rain_month_year.items()
+                  if mm == m and days_month_year[(y, mm)] >= 28]
+        d = by_month[m]
+        avg = lambda xs: round(sum(xs) / len(xs), 1) if xs else None  # noqa: E731
+        monthly.append({
+            "month": names[m - 1],
+            "rain_mm": round(sum(totals) / len(totals)) if totals else None,
+            "temp_mean_c": avg(d["temperature_2m_mean"]),
+            "temp_max_c": avg(d["temperature_2m_max"]),
+            "solar_kwh_m2_day": (round(sum(d["shortwave_radiation_sum"]) /
+                                       len(d["shortwave_radiation_sum"]) / 3.6, 2)
+                                 if d["shortwave_radiation_sum"] else None),
+        })
+    # only calendar years with (near-)complete daily records
+    yearly = [{"year": y, "rain_mm": round(sum(v))}
+              for y, v in sorted(rain_year.items()) if len(v) >= 360]
+    rains = [m["rain_mm"] for m in monthly if m["rain_mm"] is not None]
+    wettest = max(monthly, key=lambda m: m["rain_mm"] or 0)["month"] if rains else None
+    hottest = (max(monthly, key=lambda m: m["temp_max_c"] or -99)["month"]
+               if any(m["temp_max_c"] for m in monthly) else None)
+    return {
+        "monthly": monthly,
+        "yearly_rain": yearly,
+        "wettest_month": wettest,
+        "hottest_month": hottest,
+        "dry_months": sum(1 for r in rains if r < 30),
+    }
 
 
 def _iter_feature_points(feat: dict):
@@ -144,10 +217,10 @@ def _iter_feature_points(feat: dict):
                     yield c[1], c[0]
 
 
-def _infrastructure_evidence(lat: float, lon: float) -> dict:
+def _infrastructure_evidence(lat: float, lon: float, city: str) -> dict:
     """
     Nearest road / hospital / school / transit, computed locally from the
-    cached AOI OpenStreetMap layer (backend/data/osm_infrastructure.geojson).
+    cached per-city OSM layer (backend/data/osm_infrastructure_<city>.geojson).
 
     No network call on the request path: the layer is fetched once by the
     /gis infrastructure endpoint (and a startup warm-up) and reused here.
@@ -156,7 +229,7 @@ def _infrastructure_evidence(lat: float, lon: float) -> dict:
     if not reg.can_use_for_analysis("osm_infrastructure"):
         return {"ok": False, "reason": "osm_infrastructure not analytically eligible"}
 
-    cache = _DATA_DIR / "osm_infrastructure.geojson"
+    cache = _DATA_DIR / f"osm_infrastructure_{city}.geojson"
     if not cache.exists():
         return {"ok": False, "reason": "OSM infrastructure layer is still "
                                        "warming up; retry shortly."}
@@ -207,8 +280,9 @@ def _infrastructure_evidence(lat: float, lon: float) -> dict:
     }
 
 
-# Everything the platform is expected to know but cannot yet substantiate.
-_KNOWN_GAPS = [
+# Gaps backed by national bodies — the same dataset regardless of which
+# prototype city the point falls in.
+_NATIONAL_GAPS = [
     ("terrain_elevation_slope", "copernicus_dem",
      "Elevation, slope and aspect need the Copernicus DEM, which has not been "
      "acquired to local storage yet."),
@@ -217,15 +291,6 @@ _KNOWN_GAPS = [
      "(open, acquisition pending)."),
     ("land_cover_change", "esri_lulc_2017",
      "2017→2024 land-cover change needs both Esri epochs (acquisition pending)."),
-    ("cadastral_parcel", "cadastral_geometry",
-     "Parcel boundary is government data — OFFICIAL ACCESS REQUIRED."),
-    ("ownership_title", "ownership_records",
-     "Ownership/title is restricted personal data — OFFICIAL ACCESS REQUIRED."),
-    ("flood_hazard", "tnsdma_flood_hazard",
-     "Flood/inundation hazard is held by TNSDMA — OFFICIAL ACCESS REQUIRED."),
-    ("zoning_landuse_plan", "master_plan",
-     "Statutory zoning exists only as Master Plan PDFs — DOCUMENT ONLY, not "
-     "digitised."),
     ("soil_capability", "nbsslup_soil",
      "Soil series / land-capability is a licensed NBSS&LUP product — OFFICIAL "
      "ACCESS REQUIRED."),
@@ -234,34 +299,101 @@ _KNOWN_GAPS = [
      "REQUIRED."),
 ]
 
+# Gaps held by STATE government authorities — shared by every prototype city
+# in that state, since it's the same real dataset either way (e.g. Madurai
+# and Kovilpatti both sit under TN Survey & Settlement / TNSDMA). Add a state
+# here only once its datasets exist in data_registry.py.
+_STATE_GAPS: dict[str, list[tuple[str, str, str]]] = {
+    "Tamil Nadu": [
+        ("cadastral_parcel", "cadastral_geometry",
+         "Parcel boundary is government data — OFFICIAL ACCESS REQUIRED."),
+        ("ownership_title", "ownership_records",
+         "Ownership/title is restricted personal data — OFFICIAL ACCESS REQUIRED."),
+        ("flood_hazard", "tnsdma_flood_hazard",
+         "Flood/inundation hazard is held by TNSDMA — OFFICIAL ACCESS REQUIRED."),
+    ],
+    "Madhya Pradesh": [
+        ("cadastral_parcel", "mp_cadastral_geometry",
+         "Parcel boundary is government data — OFFICIAL ACCESS REQUIRED."),
+        ("ownership_title", "mp_ownership_records",
+         "Ownership/title is restricted personal data — OFFICIAL ACCESS REQUIRED."),
+        ("flood_hazard", "mpsdma_flood_hazard",
+         "Flood/inundation hazard is held by MPSDMA — OFFICIAL ACCESS REQUIRED."),
+    ],
+}
+
+# Gaps that are genuinely per-TOWN, not per-state — each town's own master
+# plan is a different document with its own publication status.
+_CITY_GAPS: dict[str, list[tuple[str, str, str]]] = {
+    "madurai": [
+        ("zoning_landuse_plan", "master_plan",
+         "Statutory zoning exists only as Master Plan PDFs — DOCUMENT ONLY, not "
+         "digitised."),
+    ],
+    "bhopal": [
+        ("zoning_landuse_plan", "bhopal_master_plan",
+         "Statutory zoning exists only as the Bhopal Development Plan PDF — "
+         "DOCUMENT ONLY, not digitised."),
+    ],
+    "kovilpatti": [
+        ("zoning_landuse_plan", "kovilpatti_master_plan",
+         "No statutory zoning document exists yet — Kovilpatti's GIS master "
+         "plan is still in preparation (AMRUT 2.0), not published."),
+    ],
+}
+
 
 def get_location_evidence(lat: float, lon: float,
                           include_site_context: bool = False) -> dict:
     check = validate_coordinate(lat, lon)
     if not check["valid"]:
         return {"error": check["reason"], "coordinate_check": check}
+    city = check["city"]
 
     verified: list[dict] = []
     gaps: list[dict] = []
 
-    for key, fn in (("climate", _climate_evidence),
-                    ("infrastructure", _infrastructure_evidence)):
-        res = fn(lat, lon)
+    from services import land_details as ld  # lazy: keeps import graph flat
+    sources = {"climate": lambda la, lo: _climate_evidence(la, lo),
+               "infrastructure": lambda la, lo: _infrastructure_evidence(la, lo, city),
+               **ld.SOURCES}
+    # The live sources are independent network calls — fetch them in parallel,
+    # but never let one slow service (SoilGrids can take 20 s) hold the whole
+    # report: after the deadline, a late source is reported as still fetching
+    # and keeps running in the background, filling its cache for the next load.
+    pool = ThreadPoolExecutor(max_workers=len(sources))
+    futures = {key: pool.submit(fn, lat, lon) for key, fn in sources.items()}
+    wait(futures.values(), timeout=_LIVE_DEADLINE_S)
+    pool.shutdown(wait=False)
+    for key, fut in futures.items():
+        if not fut.done():
+            res = {"ok": False, "pending": True,
+                   "reason": "This source is slow to answer and is still being fetched.",
+                   "resolution": "Reload the report in a few seconds — the value is cached "
+                                 "as soon as it arrives."}
+        else:
+            try:
+                res = fut.result()
+            except Exception as exc:  # noqa: BLE001 - a crashed source is a gap
+                res = {"ok": False, "reason": f"{exc.__class__.__name__}"}
         if res.get("ok"):
             verified.append({"topic": key, **{k: res[k] for k in ("value", "provenance")}})
         else:
             gaps.append({
                 "topic": key,
                 "reason": res.get("reason", "unavailable"),
-                "resolution": "Retry when the live source is reachable.",
+                "resolution": res.get("resolution",
+                                      "Retry when the live source is reachable."),
+                "pending": bool(res.get("pending")),
             })
+    verified_topics = {v["topic"] for v in verified}
 
     # Site context (water / land use / development) from live OSM. This hits
     # Overpass and can be slow, so it is opt-in — the frontend requests it on a
     # separate call with its own loading state; /report never blocks on it.
     if include_site_context:
         from services import site_context as sc  # lazy: avoids an import cycle
-        ctx = sc.build_site_context(lat, lon)
+        ctx = sc.build_site_context(lat, lon, city)
         if ctx.get("available"):
             for topic in ("water", "land_use", "development"):
                 verified.append({"topic": topic, "value": ctx[topic],
@@ -272,7 +404,16 @@ def get_location_evidence(lat: float, lon: float,
                              "reason": ctx.get("reason", "OSM site context unavailable"),
                              "resolution": "Retry when Overpass is reachable."})
 
-    for topic, ds_id, reason in _KNOWN_GAPS:
+    state = check["state"]
+    all_gaps = _NATIONAL_GAPS + _STATE_GAPS.get(state, []) + _CITY_GAPS.get(city, [])
+    for topic, ds_id, reason in all_gaps:
+        # GLO-90 terrain (via the elevation API) answers elevation/slope; the
+        # GLO-30 raster is then an upgrade, not an open gap.
+        if topic == "terrain_elevation_slope" and "terrain" in verified_topics:
+            continue
+        # likewise the live Sentinel-2 time series answers class and change
+        if topic in ("land_cover_class", "land_cover_change") and "land_cover" in verified_topics:
+            continue
         d = reg.get_dataset(ds_id)
         gaps.append({
             "topic": topic,
@@ -287,7 +428,8 @@ def get_location_evidence(lat: float, lon: float,
             "latitude": round(float(lat), 6),
             "longitude": round(float(lon), 6),
             "in_city_core": check.get("in_city_core", False),
-            "area_of_interest": "Madurai prototype AOI",
+            "city": city,
+            "area_of_interest": f"{check['city_label']} prototype AOI",
         },
         "verified_evidence": verified,
         "data_gaps": gaps,
@@ -336,9 +478,10 @@ def build_report(lat: float, lon: float) -> dict:
 
 def provenance_manifest() -> dict:
     """All datasets with provenance — the export/manifest payload."""
+    prototypes = ", ".join(c["label"] for c in city_registry.list_cities())
     return {
         "generated": date.today().isoformat(),
-        "platform": "National Digital Platform — Madurai prototype",
+        "platform": f"National Digital Platform — {prototypes} prototypes",
         "datasets": [
             {k: d[k] for k in ("id", "name", "status", "source", "authority",
                                "license", "acquisition_date", "last_updated",

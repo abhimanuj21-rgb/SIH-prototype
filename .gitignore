@@ -10,10 +10,9 @@ node_modules/
 frontend/dist/
 npm-debug.log*
 
-# Data caches (regenerated at runtime)
-backend/data/osm_infrastructure.geojson
-backend/data/osm_hydrology.geojson
-backend/data/osm_landuse.geojson
+# Data caches. The per-city OSM layers (backend/data/osm_*_<city>.geojson) ARE
+# committed so a fresh deploy works immediately instead of re-downloading them
+# from Overpass (~20 min); the server still refreshes them after 7 days.
 backend/data/site_context_cache.json
 backend/data/features_cache.json
 

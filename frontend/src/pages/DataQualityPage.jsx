@@ -1,6 +1,7 @@
 import useAsync from '../hooks/useAsync.js'
 import api from '../services/api.js'
 import { Loading, ErrorBox, Stat } from '../components/Bits.jsx'
+import Reveal from '../components/Reveal.jsx'
 
 export default function DataQualityPage() {
   const { data, error, loading } = useAsync(() => api.qualityAudit(), [])
@@ -20,13 +21,15 @@ export default function DataQualityPage() {
       {data && (
         <>
           <div className="grid-2">
-            <Stat value={`${data.passed}/${data.total}`} label="Checks passed" />
-            <Stat value={data.failed} label="Checks failed" />
-            <Stat value={data.demo_data_leak ? 'YES ⚠️' : 'No'} label="Demo data leak" />
-            <Stat value={data.provenance_complete_all ? 'Complete' : 'Incomplete'} label="Provenance" />
+            {[
+              <Stat value={`${data.passed}/${data.total}`} label="Checks passed" />,
+              <Stat value={data.failed} label="Checks failed" />,
+              <Stat value={data.demo_data_leak ? 'YES ⚠️' : 'No'} label="Demo data leak" />,
+              <Stat value={data.provenance_complete_all ? 'Complete' : 'Incomplete'} label="Provenance" />,
+            ].map((tile, i) => <Reveal as="div" key={i} delay={i * 60}>{tile}</Reveal>)}
           </div>
 
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <Reveal className="card" delay={100} style={{ padding: 0, overflow: 'hidden' }}>
             <table>
               <thead>
                 <tr><th>Dataset</th><th>Status</th><th>Provenance</th><th>Gate</th><th>Result</th></tr>
@@ -46,7 +49,7 @@ export default function DataQualityPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Reveal>
         </>
       )}
     </div>

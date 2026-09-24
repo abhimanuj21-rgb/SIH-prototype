@@ -51,8 +51,20 @@ def _ds(
     limitations: str = "",
     acquisition: str = "",
     analytical_eligible: Optional[bool] = None,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
 ) -> dict:
-    """Build a registry record with complete provenance fields."""
+    """Build a registry record with complete provenance fields.
+
+    `city` ties a dataset to one prototype area (services/cities.py) — use it
+    for things that are genuinely per-place, like an administrative boundary
+    or a town's own master plan.
+    `state` ties a dataset to a STATE government authority shared by every
+    prototype city in that state (TN Survey & Settlement, TNSDMA, …) — use it
+    instead of `city` so e.g. Madurai and Kovilpatti (both Tamil Nadu) reuse
+    the one real dataset rather than duplicating it under a second city tag.
+    National-body datasets (CGWB, NBSS&LUP, ISRO, Esri, …) leave both None.
+    """
     if analytical_eligible is None:
         analytical_eligible = status == Status.AVAILABLE
     return {
@@ -68,10 +80,12 @@ def _ds(
         "limitations": limitations,
         "acquisition": acquisition,
         "analytical_eligible": bool(analytical_eligible),
+        "city": city,
+        "state": state,
     }
 
 
-# --- The 26 core datasets --------------------------------------------------
+# --- The 42 core datasets --------------------------------------------------
 DATASETS: list[dict] = [
     # --- Base / boundary ---
     _ds("madurai_boundary", "Madurai administrative boundary", "Boundary",
@@ -85,7 +99,38 @@ DATASETS: list[dict] = [
                     "surveyed cadastral limit. Refresh with "
                     "scripts/fetch_boundary.py.",
         acquisition="scripts/fetch_boundary.py (Overpass).",
-        analytical_eligible=True),
+        analytical_eligible=True, city="madurai"),
+    _ds("bhopal_boundary", "Bhopal administrative boundary", "Boundary",
+        Status.AVAILABLE,
+        source="OpenStreetMap relation 1976080 (Bhopal, admin_level 5)",
+        authority="OpenStreetMap contributors",
+        acquisition_date="2026-09-18",
+        last_updated="2026-09-18",
+        license="ODbL 1.0",
+        limitations="This is the Bhopal DISTRICT boundary (admin_level 5) — "
+                    "OSM has no separately mapped Bhopal Municipal Corporation "
+                    "relation. It is wider than the built-up city; the "
+                    "platform's AOI/city-core for evidence lookups is scoped "
+                    "tighter than the full district. Refresh with "
+                    "scripts/fetch_boundary.py.",
+        acquisition="scripts/fetch_boundary.py bhopal (Overpass).",
+        analytical_eligible=True, city="bhopal"),
+    _ds("kovilpatti_boundary", "Kovilpatti administrative boundary", "Boundary",
+        Status.AVAILABLE,
+        source="OpenStreetMap relation 10311689 (Kovilpatti, admin_level 6)",
+        authority="OpenStreetMap contributors",
+        acquisition_date="2026-09-18",
+        last_updated="2026-09-18",
+        license="ODbL 1.0",
+        limitations="This is the Kovilpatti TALUK/DIVISION boundary "
+                    "(admin_level 6) — OSM has no separately mapped Kovilpatti "
+                    "Municipality relation (the municipal limits are ~6.5 km², "
+                    "per thoothukudi.nic.in, far smaller than this taluk). The "
+                    "platform's AOI/city-core for evidence lookups is scoped "
+                    "to the town, not the full taluk. Refresh with "
+                    "scripts/fetch_boundary.py.",
+        acquisition="scripts/fetch_boundary.py kovilpatti (Overpass).",
+        analytical_eligible=True, city="kovilpatti"),
 
     # --- OpenStreetMap (keyless, live) ---
     _ds("osm_infrastructure", "OSM infrastructure (roads, health, education, transit)", "Infrastructure",
@@ -124,6 +169,109 @@ DATASETS: list[dict] = [
         license="CC-BY 4.0 (Open-Meteo); ERA5 Copernicus licence",
         limitations="~9 km reanalysis grid; local microclimate not resolved.",
         acquisition="HTTPS GET to archive-api.open-meteo.com, no key."),
+
+    # --- Live weather (keyless, refreshed every 10 min) ---
+    _ds("open_meteo_forecast", "Open-Meteo current weather & 7-day forecast", "Climate",
+        Status.AVAILABLE,
+        source="Open-Meteo Forecast API (best-match NWP: ECMWF IFS, GFS, ICON …)",
+        authority="Open-Meteo; national weather-service models",
+        acquisition_date="live", last_updated="every 15 minutes",
+        license="CC-BY 4.0 (Open-Meteo)",
+        limitations="Model analysis/forecast on a ~9–25 km grid, not a "
+                    "thermometer at the site. Cross-checked against the nearest "
+                    "airport METAR observation where one exists.",
+        acquisition="HTTPS GET to api.open-meteo.com/v1/forecast, no key."),
+    _ds("awc_metar", "Airport weather observations (METAR)", "Climate",
+        Status.AVAILABLE,
+        source="NOAA Aviation Weather Center METAR API",
+        authority="NOAA AWC; observations by the India Meteorological Department "
+                  "at airport stations",
+        acquisition_date="live", last_updated="every 30–60 minutes",
+        license="US Government public domain",
+        limitations="A MEASURED reading, but at the nearest airport — which "
+                    "may be tens of km from the site and at a different "
+                    "elevation. Shown with its distance and age.",
+        acquisition="HTTPS GET to aviationweather.gov/api/data/metar, no key."),
+
+    _ds("openaq_stations", "Air-quality monitoring stations (CPCB / SPCB via OpenAQ)", "Environment",
+        Status.AVAILABLE,
+        source="OpenAQ API v3 (aggregating CPCB CAAQMS and state board monitors)",
+        authority="Central Pollution Control Board / State Pollution Control Boards; "
+                  "aggregated by OpenAQ",
+        acquisition_date="live", last_updated="hourly (station dependent)",
+        license="CC-BY 4.0 (OpenAQ); source-agency terms apply",
+        limitations="MEASURED station data, but only where a monitor exists (most "
+                    "are in city centres). Needs a free OpenAQ API key in the "
+                    "OPENAQ_API_KEY environment variable — without it the source is "
+                    "skipped and the page says so.",
+        acquisition="HTTPS GET to api.openaq.org/v3 with X-API-Key."),
+
+    _ds("esri_lulc_timeseries", "Sentinel-2 10 m land cover, 2017–2025 (live point sampling)", "Land cover",
+        Status.AVAILABLE,
+        source="Esri Living Atlas ImageServer — Sentinel-2 10 m Land Use/Land Cover time series",
+        authority="Esri, Impact Observatory, Microsoft; imagery ESA Copernicus Sentinel-2",
+        acquisition_date="live", last_updated="annual (2017–2025)",
+        license="CC-BY 4.0",
+        limitations="Machine-learning classification (~85% overall accuracy per the "
+                    "producers) — small plots, shade and mixed pixels can be "
+                    "mis-classed. Sampled live at a 7x7 point grid around a location; "
+                    "the full rasters for map layers (esri_lulc_2017 / 2024) are "
+                    "still pending local acquisition.",
+        acquisition="HTTPS getSamples on ic.imagery1.arcgis.com, no key."),
+
+    # --- Point-sampled open APIs (keyless, live, cached per ~100 m) ---
+    _ds("open_meteo_elevation", "Copernicus DEM GLO-90 elevation (via Open-Meteo)", "Terrain",
+        Status.AVAILABLE,
+        source="Open-Meteo Elevation API (Copernicus DEM GLO-90)",
+        authority="ESA / Copernicus; served by Open-Meteo",
+        acquisition_date="live", last_updated="static DEM (2021 release)",
+        license="Copernicus free & open; CC-BY 4.0 (Open-Meteo)",
+        limitations="90 m posting — slope is computed over ~100 m and smooths "
+                    "small banks, bunds and cuttings. Surface model: includes "
+                    "buildings and tree canopy. The 30 m GLO-30 upgrade "
+                    "(copernicus_dem) is still pending local acquisition.",
+        acquisition="HTTPS GET to api.open-meteo.com/v1/elevation, no key."),
+    _ds("soilgrids", "ISRIC SoilGrids 2.0 (250 m modelled soil properties)", "Soil",
+        Status.AVAILABLE,
+        source="ISRIC SoilGrids REST API v2.0",
+        authority="ISRIC — World Soil Information",
+        acquisition_date="live", last_updated="SoilGrids 2.0 (2020)",
+        license="CC-BY 4.0",
+        limitations="Global machine-learning MODEL at 250 m, not a field soil "
+                    "survey; masks built-up land (no values in dense urban "
+                    "cells). Gives texture / pH / carbon, NOT a land-capability "
+                    "class — the official NBSS&LUP survey remains a gap.",
+        acquisition="HTTPS GET to rest.isric.org/soilgrids/v2.0, no key."),
+    _ds("open_meteo_air_quality", "CAMS air quality (via Open-Meteo)", "Environment",
+        Status.AVAILABLE,
+        source="Open-Meteo Air Quality API (CAMS global forecast/analysis)",
+        authority="ECMWF Copernicus Atmosphere Monitoring Service; served by Open-Meteo",
+        acquisition_date="live", last_updated="hourly",
+        license="Copernicus licence; CC-BY 4.0 (Open-Meteo)",
+        limitations="~45 km global model grid — a regional background level, "
+                    "not a street-level monitor reading. CPCB station data is "
+                    "authoritative where a station exists.",
+        acquisition="HTTPS GET to air-quality-api.open-meteo.com, no key."),
+    _ds("nominatim_geocoding", "OSM Nominatim reverse geocoding (locality)", "Base",
+        Status.AVAILABLE,
+        source="Nominatim (OpenStreetMap) reverse geocoder",
+        authority="OpenStreetMap contributors / OSMF",
+        acquisition_date="live", last_updated="continuous",
+        license="ODbL 1.0",
+        limitations="Names the nearest mapped OSM address objects; ward / "
+                    "village names are as mapped, not an official revenue "
+                    "village lookup. Rate-limited (1 req/s), cached.",
+        acquisition="HTTPS GET to nominatim.openstreetmap.org/reverse."),
+    _ds("osm_amenities", "OSM everyday amenities (banks, shops, transit, …)", "Infrastructure",
+        Status.AVAILABLE,
+        source="OpenStreetMap via Overpass API",
+        authority="OpenStreetMap contributors",
+        acquisition_date="live", last_updated="continuous",
+        license="ODbL 1.0",
+        limitations="Community-mapped; Indian towns are under-mapped for shops "
+                    "and bus stops, so a low count can mean 'not mapped', not "
+                    "'absent'.",
+        acquisition="Overpass API query per city AOI, cached under backend/data/."),
 
     # --- Open EO / raster: not yet acquired locally ---
     _ds("copernicus_dem", "Copernicus DEM GLO-30 (elevation)", "Terrain",
@@ -206,35 +354,64 @@ DATASETS: list[dict] = [
         authority="TN Survey & Settlement / Registration Dept",
         license="Restricted — govt MoU",
         limitations="Not public. Requires data-sharing agreement.",
-        acquisition="Formal request to TN Survey & Settlement Dept."),
+        acquisition="Formal request to TN Survey & Settlement Dept.",
+        state="Tamil Nadu"),
+    _ds("mp_cadastral_geometry", "Cadastral parcel geometry", "Cadastre",
+        Status.OFFICIAL_ACCESS_REQUIRED,
+        source="Madhya Pradesh Revenue Department — Land Records (Bhu-Abhilekh)",
+        authority="MP Revenue Dept (landrecords.mp.gov.in)",
+        license="Restricted — govt MoU",
+        limitations="Not public as bulk GIS. Requires data-sharing agreement.",
+        acquisition="Formal request to MP Revenue Dept, Bhu-Abhilekh cell.",
+        state="Madhya Pradesh"),
     _ds("ownership_records", "Ownership / title records", "Cadastre",
         Status.OFFICIAL_ACCESS_REQUIRED,
         source="TN Registration Department (e-services)",
         authority="Inspector General of Registration, TN",
         license="Restricted — personal data",
         limitations="Personally identifiable; strict access controls apply.",
-        acquisition="Govt MoU; anonymised extract only."),
+        acquisition="Govt MoU; anonymised extract only.",
+        state="Tamil Nadu"),
+    _ds("mp_ownership_records", "Ownership / title records", "Cadastre",
+        Status.OFFICIAL_ACCESS_REQUIRED,
+        source="MP Department of Registration & Stamps (IGRS / SAMPADA)",
+        authority="Inspector General of Registration, Madhya Pradesh",
+        license="Restricted — personal data",
+        limitations="Personally identifiable; strict access controls apply.",
+        acquisition="Govt MoU; anonymised extract only.",
+        state="Madhya Pradesh"),
     _ds("e_adangal", "e-Adangal / village accounts", "Land records",
         Status.OFFICIAL_ACCESS_REQUIRED,
         source="TN e-Adangal portal",
         authority="Commissionerate of Revenue Administration, TN",
         license="Restricted",
         limitations="Per-survey-number access, no bulk export.",
-        acquisition="Revenue Dept data-sharing request."),
+        acquisition="Revenue Dept data-sharing request.",
+        state="Tamil Nadu"),
     _ds("tnsdma_flood_hazard", "Flood hazard / inundation zones", "Hazard",
         Status.OFFICIAL_ACCESS_REQUIRED,
         source="TN State Disaster Management Authority",
         authority="TNSDMA",
         license="Restricted",
         limitations="Not published as GIS; request required.",
-        acquisition="Formal request to TNSDMA."),
+        acquisition="Formal request to TNSDMA.",
+        state="Tamil Nadu"),
+    _ds("mpsdma_flood_hazard", "Flood hazard / inundation zones", "Hazard",
+        Status.OFFICIAL_ACCESS_REQUIRED,
+        source="Madhya Pradesh State Disaster Management Authority",
+        authority="MPSDMA",
+        license="Restricted",
+        limitations="Not published as GIS; request required.",
+        acquisition="Formal request to MPSDMA.",
+        state="Madhya Pradesh"),
     _ds("wrd_hydrology", "WRD hydrology / tank network", "Hydrology",
         Status.OFFICIAL_ACCESS_REQUIRED,
         source="TN Water Resources Department",
         authority="WRD, PWD Tamil Nadu",
         license="Restricted",
         limitations="Authoritative tank/anicut network; not public GIS.",
-        acquisition="WRD data-sharing request."),
+        acquisition="WRD data-sharing request.",
+        state="Tamil Nadu"),
     _ds("nbsslup_soil", "Soil series / land capability", "Soil",
         Status.OFFICIAL_ACCESS_REQUIRED,
         source="NBSS&LUP",
@@ -248,7 +425,8 @@ DATASETS: list[dict] = [
         authority="Directorate of Agriculture, TN",
         license="Restricted",
         limitations="Season-wise, parcel-level; not public.",
-        acquisition="Agriculture Dept data request."),
+        acquisition="Agriculture Dept data request.",
+        state="Tamil Nadu"),
     _ds("cgwb_groundwater", "Groundwater level & quality (observation wells)", "Hydrogeology",
         Status.OFFICIAL_ACCESS_REQUIRED,
         source="Central Ground Water Board / TWAD",
@@ -264,21 +442,44 @@ DATASETS: list[dict] = [
         authority="Directorate of Town & Country Planning, TN",
         license="Public document",
         limitations="PDF maps and text; zoning not digitised as GIS.",
-        acquisition="DTCP published master plan PDFs."),
+        acquisition="DTCP published master plan PDFs.",
+        city="madurai"),
+    _ds("kovilpatti_master_plan", "Kovilpatti GIS Master Plan (AMRUT 2.0)", "Planning",
+        Status.DATA_UNAVAILABLE,
+        source="Directorate of Town & Country Planning, Tamil Nadu",
+        authority="DTCP, Government of Tamil Nadu",
+        license="Public document (once published)",
+        limitations="Kovilpatti's GIS-based master plan (~135.85 km² planning "
+                    "area, AMRUT 2.0 Package 3) is still IN PREPARATION as of "
+                    "this build — not yet published, unlike Madurai's approved "
+                    "Second Master Plan. No statutory zoning document exists "
+                    "to acquire yet.",
+        acquisition="Watch tcp.tn.gov.in/masterplans for publication.",
+        analytical_eligible=False, city="kovilpatti"),
+    _ds("bhopal_master_plan", "Bhopal Development Plan 2031", "Planning",
+        Status.DOCUMENT_ONLY,
+        source="Directorate of Town & Country Planning, Madhya Pradesh",
+        authority="Urban Development & Housing Dept, MP (DT&CP)",
+        license="Public document",
+        limitations="PDF maps and text (BDP 2031); zoning not digitised as GIS.",
+        acquisition="DT&CP MP published Bhopal Development Plan PDFs.",
+        city="bhopal"),
     _ds("tncdbr_regulations", "TN Combined Development & Building Rules", "Regulation",
         Status.DOCUMENT_ONLY,
         source="TCP Act / TNCDBR 2019 gazette",
         authority="Housing & Urban Development Dept, TN",
         license="Public document",
         limitations="Legal text; must be encoded into rules manually.",
-        acquisition="Gazette notification PDF."),
+        acquisition="Gazette notification PDF.",
+        state="Tamil Nadu"),
     _ds("tn_agricultural_stats", "TN Season & Crop Report / agricultural statistics", "Agriculture",
         Status.DOCUMENT_ONLY,
         source="Dept of Economics & Statistics, TN",
         authority="DES, Government of Tamil Nadu",
         license="Public document",
         limitations="District/taluk tables in PDF; no parcel detail.",
-        acquisition="DES published season & crop reports."),
+        acquisition="DES published season & crop reports.",
+        state="Tamil Nadu"),
 
     # --- Demo (never analytical) ---
     _ds("demo_cadastral_grid", "DEMO DATA — sample digital cadastral grid", "Demo",
@@ -296,16 +497,34 @@ DATASETS: list[dict] = [
 
 _BY_ID = {d["id"]: d for d in DATASETS}
 
-assert len(DATASETS) == 26, f"expected 26 datasets, found {len(DATASETS)}"
+assert len(DATASETS) == 42, f"expected 42 datasets, found {len(DATASETS)}"
+
+
+def _applies_to_city(d: dict, city: str, state: Optional[str]) -> bool:
+    """A dataset applies to a queried city if it's tied to that exact city
+    (a boundary, a town's own master plan, …), tied to that city's STATE (a
+    state-government authority shared by every city there), or tied to
+    neither (a national body — CGWB, NBSS&LUP, ISRO, Esri, OSM, …)."""
+    if d["city"] is not None:
+        return d["city"] == city
+    if d["state"] is not None:
+        return d["state"] == state
+    return True
 
 
 # --- Public API ----------------------------------------------------------
-def list_datasets(status: Optional[str] = None, category: Optional[str] = None) -> list[dict]:
+def list_datasets(status: Optional[str] = None, category: Optional[str] = None,
+                  city: Optional[str] = None) -> list[dict]:
     rows = DATASETS
     if status:
         rows = [d for d in rows if d["status"] == status]
     if category:
         rows = [d for d in rows if d["category"].lower() == category.lower()]
+    if city:
+        from services import cities as city_registry
+        cfg = city_registry.get_city(city)
+        state = cfg["state"] if cfg else None
+        rows = [d for d in rows if _applies_to_city(d, city, state)]
     return rows
 
 

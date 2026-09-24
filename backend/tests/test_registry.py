@@ -2,9 +2,9 @@
 from services import data_registry as reg
 
 
-def test_exactly_26_datasets():
-    assert len(reg.DATASETS) == 26
-    assert len({d["id"] for d in reg.DATASETS}) == 26
+def test_exactly_42_datasets():
+    assert len(reg.DATASETS) == 42
+    assert len({d["id"] for d in reg.DATASETS}) == 42
 
 
 def test_every_dataset_has_complete_provenance():
@@ -49,6 +49,6 @@ def test_unknown_dataset_is_closed():
 
 def test_summary_counts_add_up():
     s = reg.summary()
-    assert s["total"] == 26
-    assert sum(s["by_status"].values()) == 26
+    assert s["total"] == 42
+    assert sum(s["by_status"].values()) == 42
     assert s["analytically_usable_count"] == len(s["analytically_usable"])

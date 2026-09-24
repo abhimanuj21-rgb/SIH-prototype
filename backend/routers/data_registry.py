@@ -7,9 +7,10 @@ router = APIRouter()
 
 @router.get("/")
 def list_all(status: str | None = Query(default=None),
-             category: str | None = Query(default=None)):
-    return {"count": len(reg.list_datasets(status, category)),
-            "datasets": reg.list_datasets(status, category)}
+             category: str | None = Query(default=None),
+             city: str | None = Query(default=None)):
+    rows = reg.list_datasets(status, category, city)
+    return {"count": len(rows), "datasets": rows}
 
 
 @router.get("/summary")

@@ -1,0 +1,8 @@
+# Render.com blueprint — New > Blueprint > pick this repo. Builds the Dockerfile
+# and gives a public https://<name>.onrender.com link for the whole platform.
+services:
+  - type: web
+    name: sih-land-intelligence
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/v1/health

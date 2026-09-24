@@ -4,6 +4,164 @@ Built from scratch on 2026-09-08 following the development execution plan.
 The plan assumed an existing codebase with a blank-page bug; the target folder
 was empty, so Phase 1 became "build the app shell" rather than "debug" it.
 
+## Phase 9 — Third prototype city: Kovilpatti (2026-09-18)
+
+Same pattern as Phase 8's Bhopal addition, but same-state as Madurai, which
+surfaced a real modelling gap and forced a small architecture correction.
+
+- **Registry: `city` vs `state`.** Phase 8 tagged every state-authority
+  dataset (`cadastral_geometry`, `ownership_records`, `tnsdma_flood_hazard`,
+  `wrd_hydrology`, `tngis_crop_survey`, `tncdbr_regulations`,
+  `tn_agricultural_stats`) with `city="madurai"`. That was wrong the moment a
+  second Tamil Nadu city showed up — TN Survey & Settlement, TNSDMA etc. are
+  the same real dataset regardless of which TN town you ask about, so
+  duplicating them under `kovilpatti_*` ids would have been dishonest
+  (implying two different datasets that don't exist). Fixed by adding a
+  `state` field to `_ds()` alongside `city`: `city` for genuinely per-place
+  things (a boundary, a town's own master plan), `state` for a
+  state-government authority shared by every prototype city there,
+  `None`/`None` for national bodies (CGWB, NBSS&LUP, ISRO, Esri, OSM). A
+  dataset applies to a queried city if it matches that city exactly, else
+  matches that city's state, else is national — see
+  `data_registry._applies_to_city()`. `evidence_engine._STATE_GAPS` was
+  re-keyed by state name the same way, with a new `_CITY_GAPS` layer for the
+  genuinely per-town exception (each city's master plan/zoning status).
+- **Kovilpatti's own master plan is a different case, correctly.** Verified
+  via web search before writing anything: Kovilpatti's GIS-based master plan
+  (~135.85 km² planning area) is under AMRUT 2.0 Package 3 and still **in
+  preparation**, not published — unlike Madurai's approved Second Master
+  Plan. So `kovilpatti_master_plan` is `DATA_UNAVAILABLE` (no document exists
+  to acquire yet), not `DOCUMENT_ONLY` like Madurai's. Reusing Madurai's
+  entry, or copy-pasting its status, would have fabricated a document that
+  doesn't exist.
+- **Boundary: taluk, not municipality, and said so.** Kovilpatti's real
+  municipal limits are ~6.5 km² (thoothukudi.nic.in), but OSM has no
+  admin_level-8 relation for the municipality — same situation as Bhopal.
+  `scripts/fetch_boundary.py kovilpatti` fell back to relation 10311689,
+  Kovilpatti **taluk/division** (admin_level 6), bbox roughly 8.88–9.25°N /
+  77.67–77.98°E. Registry `limitations` says exactly that, rather than
+  implying a tight municipal boundary. AOI/city_core/cadastral_patch in
+  `services/cities.py` are scoped to the town regardless of the boundary
+  polygon's real extent (same independence as Madurai/Bhopal).
+- **Registry: 31 → 33 datasets** (`kovilpatti_boundary`,
+  `kovilpatti_master_plan`). Reused rather than duplicated: `cadastral_geometry`,
+  `ownership_records`, `tnsdma_flood_hazard`, `wrd_hydrology`,
+  `tngis_crop_survey`, `tncdbr_regulations`, `tn_agricultural_stats` (now
+  `state="Tamil Nadu"`, so they show for both Madurai and Kovilpatti).
+- **Frontend:** `ExplorerPage`'s city switcher, `MapView`'s per-city
+  center/zoom, `IntelligencePage`'s AOI hint and city-core label, and the
+  Landing/Dashboard/Layout copy all extended to three cities.
+- **Tests:** 41 pytest cases (was 39). New: dataset-count assertions (33),
+  a Kovilpatti evidence-resolution test asserting it shares TN's real
+  datasets with Madurai (`cadastral_geometry`, `tnsdma_flood_hazard`) but has
+  its own distinct `kovilpatti_master_plan`, and a registry filter test
+  proving a state dataset appears for both TN cities while a per-city one
+  (a boundary) doesn't leak across them.
+
+## Phase 8 — Second prototype city (Bhopal) + UI redesign (2026-09-14 to 2026-09-18)
+
+Two independent efforts landed together: a full front-end visual redesign,
+and expanding the platform from a single hard-coded city to a real
+multi-city architecture, proven out with Bhopal, Madhya Pradesh.
+
+### UI redesign
+
+- **Theme.** Replaced the dark navy theme with a light, warm-neutral canvas
+  (`#F7F5F0`) plus a dark charcoal sidebar (`#171A21`) — a two-tone
+  professional layout (Linear/Stripe-style), terracotta (`#B4543A`) as the
+  single brand accent app-wide, sage/amber/crimson retuned for legibility on
+  light surfaces. Map legend/popups switched from dark overlays to white
+  panels; left the actual map *data* colours (POI dots, land-use fills)
+  untouched since those are legend-tied, not theme.
+- **Landing page hero.** Real Esri World Imagery satellite capture of the
+  Madurai AOI (same source the app's own map already uses — not a stock
+  photo) as the hero background, `frontend/public/madurai-hero.jpg`. Fixed a
+  real stacking-context bug along the way: the hero's background pseudo
+  layer had no `z-index` of its own, so it painted *behind* the page
+  background instead of in front of it (`z-index: 0` on `.lp-hero` fixed
+  it). Rebuilt as real DOM elements (`.lp-hero__bg` / `.lp-hero__fade`)
+  instead of a `::before`, giving the hero rounded corners, a soft shadow,
+  a bottom fade into the page (no hard photo cutoff), and a scroll-linked
+  parallax (`translateY(scrollY * 0.12)`, capped, skipped under
+  `prefers-reduced-motion`).
+- **Scroll reveal.** `useReveal` (IntersectionObserver) + a `<Reveal>`
+  wrapper, staggered per grid item. Initially wired up scoped to `.lp` only
+  (landing-page CSS selector), which silently no-opped everywhere else —
+  found and fixed by making `.reveal`/`.reveal.in` global, then wired into
+  every other page's cards/stat-tiles (Dashboard, Explorer, Land
+  Intelligence + Site Character, History, Climate, Data Registry, Data
+  Quality, Official Data Access).
+- **3D-style depth, not a 3D library.** Considered and rejected a full
+  React-Three-Fiber cadastral-plot visualiser (the shape of an earlier,
+  unrelated land-*sales* redesign brief) as the wrong scope for a government
+  evidence platform. Built `useTilt` instead — cursor-tracked
+  `perspective/rotateX/rotateY` tilt + lift on the hero evidence card and the
+  three governance cards, gated on `pointer: fine` and
+  `prefers-reduced-motion`.
+- **Custom cursor.** Terracotta dot + a `mix-blend-mode: difference` ring
+  (so it reads correctly on both the light content and the dark sidebar
+  without per-surface theming) that grows on hover over anything clickable;
+  hidden over text inputs and the Leaflet map so native affordances
+  (text caret, grab-hand) still work. `pointer: fine` gated.
+
+### Multi-city architecture (Bhopal)
+
+- **Why Bhopal.** Different state (Madhya Pradesh vs Tamil Nadu — genuinely
+  tests the "national" framing) and known for its lakes, a direct contrast
+  to Madurai's river-based water evidence.
+- **`services/cities.py`** (new): a small registry — id, label, state, aoi,
+  city_core, cadastral_patch, boundary file/dataset id, OSM name pattern,
+  flood authority — replacing the module-level `AOI`/`CITY_CORE` constants
+  in `evidence_engine.py`. `resolve_city_for_point(lat, lon)` picks the
+  city whose AOI contains a coordinate; `evidence.py`/`analytics.py` needed
+  **no signature changes** since they already treated lat/lon as generic
+  floats — only `routers/gis.py` (hard-coded `/madurai/...` paths) and
+  `evidence_engine`'s AOI/CITY_CORE were actually Madurai-specific.
+- **GIS routes parameterised**: `/gis/madurai/...` → `/gis/{city}/...`
+  (backward compatible — `madurai` still matches as a path value). OSM
+  layer caches split per city: `osm_{infrastructure,hydrology,landuse}_{city}.geojson`.
+- **Real boundary, verified names.** `scripts/fetch_boundary.py` generalised
+  to take a city argument. Bhopal has no admin_level-8 (municipal
+  corporation) relation in OSM either — fell back to admin_level 5
+  (**district**, relation 1976080) and the registry says so honestly rather
+  than implying a tight city boundary. Every Madhya Pradesh authority name
+  (MP Revenue Dept/Bhu-Abhilekh, MPIGRS/SAMPADA, MPSDMA, DT&CP MP) was
+  **web-verified before writing**, not guessed — matches the platform's own
+  no-fabrication rule applied to its own metadata.
+- **Cadastral demo, upgraded and fixed.** The old uniform 6×6
+  `demo_cadastral_grid` became `services/cadastral_demo.py`: a randomised
+  recursive guillotine split into irregular parcels with real geodesic area
+  (equirectangular approximation, accurate at this scale) in m² / cents /
+  sq ft, click-to-inspect popups, hover highlight — still `DEMO_ONLY`,
+  still excluded from the evidence engine and analytics gate. Caught and
+  fixed a real scale bug while building it: the first version spanned the
+  entire city core, averaging **2.3 million m² per "parcel."** Added a
+  separate, much smaller `cadastral_patch` per city (~one street block,
+  ~200 m across) so the demo now averages a plausible few-hundred m².
+- **Real bug found while testing, not by the test suite.** `site_context.py`
+  (water/land-use/development for the Land Intelligence "Site Character"
+  card) still read the old *un-suffixed* cache filenames
+  (`osm_hydrology.geojson` etc.) after the per-city cache rename — so a
+  Bhopal coordinate was silently checking Bhopal's lat/lon against
+  *Madurai's* cached water layer. Bhopal's real Upper/Lower Lakes would have
+  shown as "no water nearby." Found by manually running a live Bhopal
+  evidence lookup after the automated suite passed; fixed by threading
+  `city` through `_water`/`_land_use`/`_development`/`build_site_context`
+  and the two call sites (`routers/evidence.py`, `evidence_engine.py`'s
+  `include_site_context` path); added a regression test
+  (`test_site_context_uses_the_right_citys_cache`) asserting Bhopal's
+  waterbody count is nonzero and its coast note doesn't say "Madurai."
+- **Registry: 26 → 31 datasets.** New Bhopal counterparts for the
+  state-authority entries (`mp_cadastral_geometry`, `mp_ownership_records`,
+  `mpsdma_flood_hazard`, `bhopal_master_plan`) plus `bhopal_boundary`.
+- **Frontend:** city switcher on Explorer (button group, fetched from
+  `/gis/cities`), `MapView` re-centers and re-fetches every layer on city
+  change, Data Registry's list endpoint gained a `city` filter, IntelligencePage
+  shows the resolved city's label instead of a hard-coded "Madurai."
+- **Tests: 26 → 39** pytest cases (Phase 7 had 26; new coverage added for
+  city resolution, the site-context cache-key regression, and per-city GIS
+  endpoints). Full suite green throughout.
+
 ## Addendum (2026-09-09) — landing page, marker audit
 
 - **Marker data-quality fix.** Reported issue: "schools marked where there are

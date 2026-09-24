@@ -18,5 +18,9 @@ def client():
 
 # A coordinate inside the Madurai city core.
 CORE = {"latitude": 9.9252, "longitude": 78.1198}
-# A coordinate well outside the AOI (Chennai).
+# A coordinate inside the Bhopal city core (near the Upper Lake).
+BHOPAL_CORE = {"latitude": 23.2599, "longitude": 77.4126}
+# A coordinate inside the Kovilpatti city core.
+KOVILPATTI_CORE = {"latitude": 9.1744, "longitude": 77.8683}
+# A coordinate well outside every prototype AOI (Chennai).
 OUTSIDE = {"latitude": 13.08, "longitude": 80.27}

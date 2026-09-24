@@ -1,9 +1,8 @@
 """API contract tests (Phases 2-6). Network-tolerant: climate/infrastructure
 may be VERIFIED or a GAP depending on connectivity — both are valid."""
-from tests.conftest import CORE, OUTSIDE
+from tests.conftest import BHOPAL_CORE, CORE, KOVILPATTI_CORE, OUTSIDE
 
 KNOWN_GAP_TOPICS = {
-    "terrain_elevation_slope", "land_cover_class", "land_cover_change",
     "cadastral_parcel", "ownership_title", "flood_hazard",
     "zoning_landuse_plan", "soil_capability", "groundwater",
 }
@@ -16,8 +15,16 @@ def test_health(client):
 
 def test_registry_list(client):
     body = client.get("/api/v1/data-registry/").json()
-    assert body["count"] == 26
-    assert len(body["datasets"]) == 26
+    assert body["count"] == 42
+    assert len(body["datasets"]) == 42
+
+
+def test_registry_filter_by_city(client):
+    body = client.get("/api/v1/data-registry/?city=bhopal").json()
+    ids = {d["id"] for d in body["datasets"]}
+    assert "mp_cadastral_geometry" in ids
+    assert "cadastral_geometry" not in ids  # Madurai-only dataset excluded
+    assert "open_meteo_climate" in ids  # national dataset always included
 
 
 def test_registry_filter_by_status(client):
@@ -41,8 +48,8 @@ def test_registry_detail_404(client):
 # --- data quality ---------------------------------------------------
 def test_quality_audit_all_pass(client):
     a = client.get("/api/v1/data-quality/audit").json()
-    assert a["total"] == 26
-    assert a["passed"] == 26
+    assert a["total"] == 42
+    assert a["passed"] == 42
     assert a["failed"] == 0
     assert a["demo_data_leak"] is False
     assert a["provenance_complete_all"] is True
@@ -54,9 +61,66 @@ def test_evidence_location_structure(client):
     assert r["location"]["in_city_core"] is True
     topics = {g["topic"] for g in r["data_gaps"]}
     assert KNOWN_GAP_TOPICS <= topics
-    # climate + infra are either verified or appear as gaps
+    # live sources are either verified or appear as gaps
     seen = {v["topic"] for v in r["verified_evidence"]} | topics
-    assert {"climate", "infrastructure"} <= seen
+    assert {"climate", "infrastructure", "terrain", "soil", "air_quality",
+            "locality", "land_cover"} <= seen
+    # GLO-90 terrain closes the terrain gap only when it actually verified
+    verified = {v["topic"] for v in r["verified_evidence"]}
+    assert ("terrain" in verified) != ("terrain_elevation_slope" in topics)
+    assert ("land_cover" in verified) != ("land_cover_class" in topics)
+
+
+def test_evidence_resolves_bhopal_as_its_own_city(client):
+    r = client.post("/api/v1/evidence/location", json=BHOPAL_CORE).json()
+    assert r["location"]["city"] == "bhopal"
+    assert r["location"]["in_city_core"] is True
+    assert "Bhopal" in r["location"]["area_of_interest"]
+    gap_datasets = {g.get("dataset") for g in r["data_gaps"]}
+    assert "mp_cadastral_geometry" in gap_datasets
+    assert "cadastral_geometry" not in gap_datasets  # that's Madurai's, not Bhopal's
+
+
+def test_evidence_resolves_kovilpatti_and_shares_tn_datasets_with_madurai(client):
+    r = client.post("/api/v1/evidence/location", json=KOVILPATTI_CORE).json()
+    assert r["location"]["city"] == "kovilpatti"
+    assert r["location"]["in_city_core"] is True
+    gap_datasets = {g.get("dataset") for g in r["data_gaps"]}
+    # Same real Tamil Nadu authorities as Madurai — not a duplicated dataset.
+    assert "cadastral_geometry" in gap_datasets
+    assert "tnsdma_flood_hazard" in gap_datasets
+    # But its own town-specific master plan, which is genuinely different
+    # (still in preparation, unlike Madurai's published one).
+    assert "kovilpatti_master_plan" in gap_datasets
+    assert "master_plan" not in gap_datasets
+
+
+def test_registry_filter_by_city_shares_state_datasets(client):
+    """Madurai and Kovilpatti are both Tamil Nadu — a state-authority dataset
+    (not a per-town one like a boundary or master plan) must appear for both."""
+    maps = {}
+    for city in ("madurai", "kovilpatti"):
+        body = client.get(f"/api/v1/data-registry/?city={city}").json()
+        maps[city] = {d["id"] for d in body["datasets"]}
+    assert "cadastral_geometry" in maps["madurai"] & maps["kovilpatti"]
+    assert "madurai_boundary" in maps["madurai"] - maps["kovilpatti"]
+    assert "kovilpatti_boundary" in maps["kovilpatti"] - maps["madurai"]
+
+
+def test_site_context_uses_the_right_citys_cache(client):
+    """Regression: site_context.py once read a single un-suffixed cache file
+    (osm_hydrology.geojson etc.), so a Bhopal point silently got Madurai's
+    cached OSM layers — Bhopal's real lakes would show up as "no water"."""
+    # Warm both cities' hydrology caches first (mirrors gis.warm_infrastructure_cache).
+    client.get("/api/v1/gis/madurai/hydrology/osm")
+    client.get("/api/v1/gis/bhopal/hydrology/osm")
+    r = client.post("/api/v1/evidence/site-context", json=BHOPAL_CORE).json()
+    assert r["location"]["city"] == "bhopal"
+    if r.get("available"):
+        # Bhopal's core sits right by the Upper Lake — if this ever reports
+        # zero waterbodies again, it's reading the wrong city's cache.
+        assert r["water"]["counts_within_2_5km"]["waterbodies"] > 0
+        assert "Madurai" not in r["water"]["coast"]["note"]
 
 
 def test_evidence_rejects_outside_aoi(client):
@@ -99,7 +163,9 @@ def test_evidence_report_is_descriptive(client):
     r = client.post("/api/v1/evidence/report", json=CORE).json()
     assert r["report_type"] == "location_evidence"
     assert "evidence_matrix" in r
-    assert len(r["data_gaps"]) >= 9
+    # the government-held gaps never close from open data alone
+    assert {"soil_capability", "groundwater", "cadastral_parcel", "ownership_title",
+            "flood_hazard", "zoning_landuse_plan"} <= {g["topic"] for g in r["data_gaps"]}
     text = (r["conclusion"] + " " + r["disclaimer"]).lower()
     assert "descriptive" in text
     assert "not for" in text or "not a prediction" in text or "no prediction" in text
@@ -119,7 +185,7 @@ def test_export_json_and_manifest(client):
                    params={"latitude": CORE["latitude"], "longitude": CORE["longitude"]})
     assert j.status_code == 200 and j.json()["report_type"] == "location_evidence"
     m = client.get("/api/v1/evidence/export/manifest").json()
-    assert len(m["datasets"]) == 26
+    assert len(m["datasets"]) == 42
     assert m["analytical_gate"].startswith("status == AVAILABLE")
 
 
@@ -146,12 +212,26 @@ def test_suitability_bad_type(client):
     assert "error" in s
 
 
+ALL_CITIES = ("madurai", "bhopal", "kovilpatti")
+
+
 # --- gis -------------------------------------------------------
+def test_gis_lists_all_cities(client):
+    body = client.get("/api/v1/gis/cities").json()
+    ids = {c["id"] for c in body["cities"]}
+    assert ids == set(ALL_CITIES)
+
+
+def test_gis_unknown_city_404(client):
+    assert client.get("/api/v1/gis/atlantis/boundary").status_code == 404
+
+
 def test_boundary_available_and_real(client):
-    b = client.get("/api/v1/gis/madurai/boundary").json()
-    assert b["available"] is True
-    assert b["is_demo"] is False
-    assert b["geojson"]["features"][0]["geometry"]["type"] in ("Polygon", "MultiPolygon")
+    for city in ALL_CITIES:
+        b = client.get(f"/api/v1/gis/{city}/boundary").json()
+        assert b["available"] is True
+        assert b["is_demo"] is False
+        assert b["geojson"]["features"][0]["geometry"]["type"] in ("Polygon", "MultiPolygon")
 
 
 def test_terrain_reports_unavailable_not_fake(client):
@@ -162,7 +242,17 @@ def test_terrain_reports_unavailable_not_fake(client):
 
 
 def test_demo_grid_is_flagged(client):
-    g = client.get("/api/v1/gis/madurai/demo-cadastral-grid").json()
-    assert g["is_demo"] is True
-    assert g["analytical_use"] == "forbidden"
-    assert all(f["properties"]["is_demo"] for f in g["geojson"]["features"])
+    for city in ALL_CITIES:
+        g = client.get(f"/api/v1/gis/{city}/demo-cadastral-grid").json()
+        assert g["is_demo"] is True
+        assert g["analytical_use"] == "forbidden"
+        feats = g["geojson"]["features"]
+        assert len(feats) >= 4
+        assert all(f["properties"]["is_demo"] for f in feats)
+        assert all(f["properties"]["area_sqm"] > 0 for f in feats)
+
+
+def test_demo_grid_parcel_count_is_configurable(client):
+    g = client.get("/api/v1/gis/madurai/demo-cadastral-grid",
+                   params={"parcels": 12, "seed": 7}).json()
+    assert len(g["geojson"]["features"]) == 12

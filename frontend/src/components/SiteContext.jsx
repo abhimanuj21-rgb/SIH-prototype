@@ -1,4 +1,5 @@
 import { Skeleton, ErrorBox } from './Bits.jsx'
+import Reveal from './Reveal.jsx'
 
 function categoryChip(cat) {
   const c = (cat || '').toLowerCase()
@@ -56,12 +57,12 @@ export default function SiteContext({ data, loading, error }) {
   const lc = land?.available !== false ? land : null
 
   return (
-    <div className="card">
+    <Reveal className="card">
       <div className="section-title">Site character — OpenStreetMap (cached AOI layers)</div>
       <div className="site-grid">
 
         {/* WATER */}
-        <div className="site-card">
+        <Reveal as="div" className="site-card">
           <h4>💧 Water source &amp; bodies</h4>
           {!wc && <p className="error-box">{water?.reason}</p>}
           {wc && <>
@@ -84,10 +85,10 @@ export default function SiteContext({ data, loading, error }) {
               <tr><td>Coast / sea</td><td className="faint">{wc.coast.note}</td></tr>
             </tbody></table>
           </>}
-        </div>
+        </Reveal>
 
         {/* LAND USE */}
-        <div className="site-card">
+        <Reveal as="div" className="site-card" delay={70}>
           <h4>🌾 Land use — agricultural or built?</h4>
           {!lc && <p className="error-box">{land?.reason}</p>}
           {lc && <>
@@ -111,10 +112,10 @@ export default function SiteContext({ data, loading, error }) {
               Definitive land cover needs the Esri/Sentinel-2 raster (still a data gap).
             </div>
           </>}
-        </div>
+        </Reveal>
 
         {/* DEVELOPMENT */}
-        <div className="site-card">
+        <Reveal as="div" className="site-card" delay={140}>
           <h4>🏗️ How developed is it?</h4>
           <div className="lead-val">{dev.level}</div>
           <p>{dev.summary}</p>
@@ -125,12 +126,12 @@ export default function SiteContext({ data, loading, error }) {
             <tr><td>Mapped facilities ≤600 m</td><td><strong>{dev.mapped_facilities_within_600m}</strong></td></tr>
           </tbody></table>
           <div className="mini" style={{ marginTop: 6 }}>{dev.method}</div>
-        </div>
+        </Reveal>
       </div>
 
       <p className="faint" style={{ margin: '12px 0 0' }}>
         Source: {data.provenance?.source}. {data.provenance?.note}
       </p>
-    </div>
+    </Reveal>
   )
 }

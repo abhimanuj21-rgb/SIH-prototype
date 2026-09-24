@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import useAsync from '../hooks/useAsync.js'
 import api from '../services/api.js'
 import { Loading, ErrorBox, StatusBadge } from '../components/Bits.jsx'
+import Reveal from '../components/Reveal.jsx'
 
 const STATUSES = [
   'AVAILABLE', 'OFFICIAL_ACCESS_REQUIRED', 'DATA_UNAVAILABLE',
@@ -46,7 +47,7 @@ export default function DataRegistryPage() {
             })}
           </div>
 
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <Reveal className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <table>
               <thead>
                 <tr>
@@ -66,10 +67,10 @@ export default function DataRegistryPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Reveal>
 
           {selected && (
-            <div className="card">
+            <Reveal className="card">
               <div className="row" style={{ justifyContent: 'space-between' }}>
                 <h3 style={{ margin: 0 }}>{selected.name}</h3>
                 <button className="secondary" onClick={() => setSelected(null)}>close</button>
@@ -89,7 +90,7 @@ export default function DataRegistryPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </Reveal>
           )}
         </>
       )}

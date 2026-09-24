@@ -65,8 +65,8 @@ def _bbox_hit(lat, lon, geom, pad_deg):
 
 
 # --- water --------------------------------------------------------
-def _water(lat: float, lon: float) -> dict:
-    loaded = _load("osm_hydrology.geojson")
+def _water(lat: float, lon: float, city: str) -> dict:
+    loaded = _load(f"osm_hydrology_{city}.geojson")
     if loaded is None:
         return {"available": False,
                 "reason": "OSM hydrology layer not fetched yet - open the "
@@ -121,17 +121,16 @@ def _water(lat: float, lon: float) -> dict:
                                 "canals_drains": len(canals),
                                 "waterbodies": len(bodies)},
         "coast": {"in_search_radius": False,
-                  "note": "Madurai is an inland district; the Bay of Bengal "
-                          "coast is roughly 130 km east, far outside the "
-                          "search radius."},
+                  "note": f"This is an inland location; no coastline is mapped "
+                          f"within the {_WATER_M} m search radius."},
         "summary": summary,
         "retrieved": retrieved,
     }
 
 
 # --- land use ----------------------------------------------------
-def _land_use(lat: float, lon: float) -> dict:
-    loaded = _load("osm_landuse.geojson")
+def _land_use(lat: float, lon: float, city: str) -> dict:
+    loaded = _load(f"osm_landuse_{city}.geojson")
     if loaded is None:
         return {"available": False,
                 "reason": "OSM land-use layer not fetched yet - open the "
@@ -204,8 +203,8 @@ def _land_use(lat: float, lon: float) -> dict:
 
 
 # --- development ----------------------------------------------
-def _development(lat: float, lon: float, land: dict) -> dict:
-    infra = _load("osm_infrastructure.geojson")
+def _development(lat: float, lon: float, land: dict, city: str) -> dict:
+    infra = _load(f"osm_infrastructure_{city}.geojson")
     road_segments = pois = 0
     if infra is not None:
         fc, _ = infra
@@ -262,15 +261,15 @@ def _development(lat: float, lon: float, land: dict) -> dict:
     }
 
 
-def build_site_context(lat: float, lon: float) -> dict:
+def build_site_context(lat: float, lon: float, city: str) -> dict:
     if not (reg.can_use_for_analysis("osm_landuse")
             and reg.can_use_for_analysis("osm_hydrology")):
         return {"available": False,
                 "reason": "OSM land-use / hydrology not analytically eligible."}
 
-    water = _water(lat, lon)
-    land = _land_use(lat, lon)
-    dev = _development(lat, lon, land)
+    water = _water(lat, lon, city)
+    land = _land_use(lat, lon, city)
+    dev = _development(lat, lon, land, city)
 
     if not water["available"] and not land["available"]:
         return {"available": False,

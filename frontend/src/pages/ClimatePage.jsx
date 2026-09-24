@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import api from '../services/api.js'
 import { Loading, ErrorBox } from '../components/Bits.jsx'
+import Reveal from '../components/Reveal.jsx'
 
 const DEFAULT = { lat: '9.9252', lng: '78.1198' }
 
@@ -30,29 +31,29 @@ export default function ClimatePage() {
         current build.
       </p>
 
-      <div className="card">
+      <Reveal className="card">
         <div className="row">
           <label>Lat <input className="inline-input" value={lat} onChange={(e) => setLat(e.target.value)} /></label>
           <label>Lon <input className="inline-input" value={lng} onChange={(e) => setLng(e.target.value)} /></label>
           <button onClick={load} disabled={loading}>Get climate</button>
         </div>
-      </div>
+      </Reveal>
 
       {loading && <Loading what="climate normals" />}
       <ErrorBox error={error} />
 
       {data && !climate && (
-        <div className="card">
+        <Reveal className="card">
           <p className="error-box">
             Climate could not be verified for this point
             {data.data_gaps?.find((g) => g.topic === 'climate')
               ? `: ${data.data_gaps.find((g) => g.topic === 'climate').reason}` : '.'}
           </p>
-        </div>
+        </Reveal>
       )}
 
       {climate && (
-        <div className="card">
+        <Reveal className="card">
           <h3>Climate normals</h3>
           <p className="muted">{climate.provenance?.source} · {climate.value?.period} · {climate.provenance?.resolution}</p>
           <table>
@@ -63,7 +64,7 @@ export default function ClimatePage() {
             </tbody>
           </table>
           <p className="muted"><em>Confidence: {climate.provenance?.confidence}. Retrieved {climate.provenance?.retrieved}.</em></p>
-        </div>
+        </Reveal>
       )}
     </div>
   )

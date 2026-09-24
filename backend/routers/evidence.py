@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from services import evidence_engine as ee
+from services import land_profile as lp
 from services import site_context as sc
 
 router = APIRouter()
@@ -29,13 +30,36 @@ def site_context(c: Coord):
         return {"available": False, "reason": chk["reason"]}
     return {"location": {"latitude": round(c.latitude, 6),
                          "longitude": round(c.longitude, 6),
+                         "city": chk["city"],
                          "in_city_core": chk.get("in_city_core", False)},
-            **sc.build_site_context(c.latitude, c.longitude)}
+            **sc.build_site_context(c.latitude, c.longitude, chk["city"])}
 
 
 @router.post("/report")
 def evidence_report(c: Coord):
     return ee.build_report(c.latitude, c.longitude)
+
+
+@router.post("/land-profile")
+def land_profile(c: Coord):
+    """Plain-language outcome: access scores, city comparison, use fit."""
+    return lp.build_profile(c.latitude, c.longitude)
+
+
+@router.get("/live-weather")
+def live_weather(latitude: float, longitude: float):
+    """Current conditions, 24 h + 7-day forecast, live air, nearest airport
+    observation and today-vs-normal for a point (cached ~10 min)."""
+    from services import live_weather as lw
+    return lw.get_live_weather(latitude, longitude)
+
+
+@router.get("/live-air")
+def live_air(latitude: float, longitude: float):
+    """Current pollutants, Indian AQI (CPCB method), 24 h past + next trend,
+    and measured station readings when an OpenAQ key is configured."""
+    from services import live_air as la
+    return la.get_live_air(latitude, longitude)
 
 
 @router.get("/export/json")
@@ -58,10 +82,26 @@ def export_manifest():
 @router.get("/export/pdf")
 def export_pdf(latitude: float, longitude: float):
     """
-    Minimal dependency-free PDF so the export path is real end-to-end.
-    Renders the evidence report as plain text pages. A richer A4 layout can
-    replace this once reportlab/weasyprint is added to requirements.
+    A4 Land Profile PDF (verdict, charts, use fit, open checks). Falls back
+    to the plain-text evidence PDF if reportlab is not installed or the
+    point is outside every prototype area.
     """
+    profile = lp.build_profile(latitude, longitude)
+    if "error" not in profile:
+        from services import live_air as la
+        from services import live_weather as lw
+        profile["live_weather"] = lw.get_live_weather(latitude, longitude)
+        profile["live_air"] = la.get_live_air(latitude, longitude)
+        try:
+            from services import pdf_report
+        except ImportError:
+            pdf_report = None
+        if pdf_report is not None:
+            name = (f"land_profile_{profile['location']['city']}_"
+                    f"{latitude:.4f}_{longitude:.4f}.pdf")
+            return Response(pdf_report.render(profile), media_type="application/pdf",
+                            headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     report = ee.build_report(latitude, longitude)
     lines: list[str] = []
     loc = report.get("location", {})

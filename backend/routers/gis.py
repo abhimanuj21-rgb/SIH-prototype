@@ -2,16 +2,24 @@ import json
 import time
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
+from services import cities as city_registry
 from services import data_registry as reg
-from services import evidence_engine as ee
 from services import overpass
 
 router = APIRouter()
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
+
+
+def _city_or_404(city: str) -> dict:
+    c = city_registry.get_city(city)
+    if c is None:
+        known = ", ".join(city_registry.CITIES)
+        raise HTTPException(404, f"Unknown city '{city}'. Known: {known}.")
+    return c
 
 
 def _unavailable(dataset_id: str, what: str) -> dict:
@@ -28,35 +36,45 @@ def _unavailable(dataset_id: str, what: str) -> dict:
     }
 
 
-@router.get("/madurai/boundary")
-def boundary():
-    path = DATA_DIR / "madurai_boundary_clean.geojson"
-    d = reg.get_dataset("madurai_boundary")
+@router.get("/cities")
+def list_cities():
+    return {"cities": [
+        {"id": c["id"], "label": c["label"], "state": c["state"], "center": c["center"]}
+        for c in city_registry.list_cities()
+    ]}
+
+
+@router.get("/{city}/boundary")
+def boundary(city: str):
+    c = _city_or_404(city)
+    path = DATA_DIR / c["boundary_file"]
+    d = reg.get_dataset(c["boundary_dataset_id"])
     if not path.exists():
-        return _unavailable("madurai_boundary", "boundary")
+        return _unavailable(c["boundary_dataset_id"], "boundary")
     gj = json.loads(path.read_text(encoding="utf-8"))
     return {
         "available": True,
         "layer": "boundary",
-        "dataset": "madurai_boundary",
+        "dataset": c["boundary_dataset_id"],
         "status": d["status"],
         "is_demo": d["status"] == reg.Status.DEMO_ONLY.value,
         "label": ("DEMO DATA — placeholder bounding box"
                   if d["status"] == reg.Status.DEMO_ONLY.value
-                  else "Madurai administrative boundary"),
+                  else f"{c['label']} administrative boundary"),
         "geojson": gj,
     }
 
 
-@router.get("/madurai/infrastructure/osm")
-def infrastructure_osm(refresh: bool = False):
-    cache = DATA_DIR / "osm_infrastructure.geojson"
+@router.get("/{city}/infrastructure/osm")
+def infrastructure_osm(city: str, refresh: bool = False):
+    c = _city_or_404(city)
+    cache = DATA_DIR / f"osm_infrastructure_{c['id']}.geojson"
     max_age = 7 * 24 * 3600
     if cache.exists() and not refresh and time.time() - cache.stat().st_mtime < max_age:
         return {"available": True, "dataset": "osm_infrastructure",
                 "cached": True, "geojson": json.loads(cache.read_text("utf-8"))}
 
-    a = ee.AOI
+    a = c["aoi"]
     bbox = f"{a['lat_min']},{a['lon_min']},{a['lat_max']},{a['lon_max']}"
     # Roads with full geometry (rendered as lines); amenities as points.
     # Kept to the higher road classes so a single Overpass call stays fast.
@@ -95,8 +113,8 @@ def infrastructure_osm(refresh: bool = False):
             continue
         lat_, lon_ = e.get("lat"), e.get("lon")
         if lat_ is None:
-            c = e.get("center") or {}
-            lat_, lon_ = c.get("lat"), c.get("lon")
+            c2 = e.get("center") or {}
+            lat_, lon_ = c2.get("lat"), c2.get("lon")
         if lat_ is None:
             continue
         amenity = tags.get("amenity", "")
@@ -124,13 +142,94 @@ def infrastructure_osm(refresh: bool = False):
             "cached": False, "count": len(feats), "geojson": fc}
 
 
+# OSM tag value -> everyday-amenity group shown in the land report
+AMENITY_GROUPS = {
+    "bank": "Banks & ATMs", "atm": "Banks & ATMs",
+    "pharmacy": "Pharmacies",
+    "police": "Police & fire", "fire_station": "Police & fire",
+    "post_office": "Post offices",
+    "marketplace": "Shops & markets", "supermarket": "Shops & markets",
+    "convenience": "Shops & markets", "general": "Shops & markets",
+    "mall": "Shops & markets", "department_store": "Shops & markets",
+    "greengrocer": "Shops & markets",
+    "bus_station": "Bus stops & stations", "bus_stop": "Bus stops & stations",
+    "fuel": "Fuel stations",
+    "place_of_worship": "Places of worship",
+    "restaurant": "Food & eating out", "cafe": "Food & eating out",
+    "fast_food": "Food & eating out",
+    "library": "Civic & community", "townhall": "Civic & community",
+    "community_centre": "Civic & community", "kindergarten": "Civic & community",
+    "park": "Parks & sport", "playground": "Parks & sport",
+    "sports_centre": "Parks & sport", "stadium": "Parks & sport",
+    "substation": "Power infrastructure", "plant": "Power infrastructure",
+}
+
+
+@router.get("/{city}/amenities/osm")
+def amenities_osm(city: str, refresh: bool = False):
+    """Everyday amenities (banks, shops, transit, worship, power …) as points."""
+    c = _city_or_404(city)
+    cache = DATA_DIR / f"osm_amenities_{c['id']}.geojson"
+    if cache.exists() and not refresh and time.time() - cache.stat().st_mtime < 7 * 24 * 3600:
+        return {"available": True, "dataset": "osm_amenities", "cached": True,
+                "geojson": json.loads(cache.read_text("utf-8"))}
+    a = c["aoi"]
+    bbox = f"{a['lat_min']},{a['lon_min']},{a['lat_max']},{a['lon_max']}"
+    q = f"""
+    [out:json][timeout:170];
+    (
+      nwr({bbox})["amenity"~"^(bank|atm|pharmacy|police|fire_station|post_office|marketplace|bus_station|fuel|place_of_worship|restaurant|cafe|fast_food|library|townhall|community_centre|kindergarten)$"];
+      nwr({bbox})["shop"~"^(supermarket|convenience|general|mall|department_store|greengrocer)$"];
+      node({bbox})["highway"="bus_stop"];
+      nwr({bbox})["leisure"~"^(park|playground|sports_centre|stadium)$"];
+      nwr({bbox})["power"~"^(substation|plant)$"];
+    );
+    out center tags;
+    """
+    try:
+        els = overpass.query(q, timeout=175.0)
+    except overpass.OverpassError as exc:
+        return {"available": False, "dataset": "osm_amenities",
+                "reason": f"Overpass unreachable ({exc})",
+                "geojson": {"type": "FeatureCollection", "features": []}}
+    feats = []
+    for e in els:
+        tags = e.get("tags", {})
+        key, val = next(((k, tags[k]) for k in ("amenity", "shop", "highway", "leisure", "power")
+                         if tags.get(k) in AMENITY_GROUPS), (None, None))
+        lat_, lon_ = e.get("lat"), e.get("lon")
+        if lat_ is None:
+            c2 = e.get("center") or {}
+            lat_, lon_ = c2.get("lat"), c2.get("lon")
+        if key is None or lat_ is None:
+            continue
+        feats.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [lon_, lat_]},
+            "properties": {"kind": "amenity", "group": AMENITY_GROUPS[val],
+                           "name": tags.get("name") or tags.get("name:en") or "",
+                           "osm_id": e.get("id"), "osm_type": e.get("type", "node"),
+                           "osm_tag": f"{key}={val}"},
+        })
+    fc = {"type": "FeatureCollection", "features": feats,
+          "properties": {"source": "OpenStreetMap via Overpass",
+                         "retrieved": time.strftime("%Y-%m-%d")}}
+    cache.write_text(json.dumps(fc), encoding="utf-8")
+    return {"available": True, "dataset": "osm_amenities", "cached": False,
+            "count": len(feats), "geojson": fc}
+
+
 def warm_infrastructure_cache() -> None:
     """Best-effort background prefetch so Explorer + site context have data."""
-    for fn in (infrastructure_osm, hydrology_osm, landuse_osm):
-        try:
-            fn(refresh=False)
-        except Exception:  # noqa: BLE001 - warm-up must never crash startup
-            pass
+    for city_id in city_registry.CITIES:
+        for fn in (infrastructure_osm, hydrology_osm, landuse_osm, amenities_osm):
+            try:
+                fn(city_id, refresh=False)
+            except Exception:  # noqa: BLE001 - warm-up must never crash startup
+                pass
+        # nearest-facility index + city-core benchmark for the land profile
+        from services import land_profile  # lazy: avoids an import cycle
+        land_profile.warm(city_id)
 
 
 def _ways_to_features(els: list, line_tags: tuple, poly_kind: str) -> list:
@@ -161,13 +260,14 @@ def _ways_to_features(els: list, line_tags: tuple, poly_kind: str) -> list:
     return feats
 
 
-@router.get("/madurai/hydrology/osm")
-def hydrology_osm(refresh: bool = False):
-    cache = DATA_DIR / "osm_hydrology.geojson"
+@router.get("/{city}/hydrology/osm")
+def hydrology_osm(city: str, refresh: bool = False):
+    c = _city_or_404(city)
+    cache = DATA_DIR / f"osm_hydrology_{c['id']}.geojson"
     if cache.exists() and not refresh and time.time() - cache.stat().st_mtime < 7 * 24 * 3600:
         return {"available": True, "dataset": "osm_hydrology", "cached": True,
                 "geojson": json.loads(cache.read_text("utf-8"))}
-    a = ee.AOI
+    a = c["aoi"]
     bbox = f"{a['lat_min']},{a['lon_min']},{a['lat_max']},{a['lon_max']}"
     q = f"""
     [out:json][timeout:150];
@@ -193,13 +293,14 @@ def hydrology_osm(refresh: bool = False):
             "count": len(feats), "geojson": fc}
 
 
-@router.get("/madurai/landuse/osm")
-def landuse_osm(refresh: bool = False):
-    cache = DATA_DIR / "osm_landuse.geojson"
+@router.get("/{city}/landuse/osm")
+def landuse_osm(city: str, refresh: bool = False):
+    c = _city_or_404(city)
+    cache = DATA_DIR / f"osm_landuse_{c['id']}.geojson"
     if cache.exists() and not refresh and time.time() - cache.stat().st_mtime < 7 * 24 * 3600:
         return {"available": True, "dataset": "osm_landuse", "cached": True,
                 "geojson": json.loads(cache.read_text("utf-8"))}
-    a = ee.AOI
+    a = c["aoi"]
     bbox = f"{a['lat_min']},{a['lon_min']},{a['lat_max']},{a['lon_max']}"
     q = f"""
     [out:json][timeout:150];
@@ -223,54 +324,50 @@ def landuse_osm(refresh: bool = False):
             "count": len(feats), "geojson": fc}
 
 
-@router.get("/madurai/terrain")
-def terrain():
+@router.get("/{city}/terrain")
+def terrain(city: str):
+    _city_or_404(city)
     return _unavailable("copernicus_dem", "terrain")
 
 
-@router.get("/madurai/lulc")
-def lulc_current():
+@router.get("/{city}/lulc")
+def lulc_current(city: str):
+    _city_or_404(city)
     return _unavailable("esri_lulc_2024", "lulc_current")
 
 
-@router.get("/madurai/lulc/history")
-def lulc_history():
+@router.get("/{city}/lulc/history")
+def lulc_history(city: str):
+    _city_or_404(city)
     return _unavailable("esri_lulc_2017", "lulc_history")
 
 
-@router.get("/madurai/lulc/change")
-def lulc_change():
+@router.get("/{city}/lulc/change")
+def lulc_change(city: str):
+    _city_or_404(city)
     return _unavailable("esri_lulc_2024", "lulc_change")
 
 
-@router.get("/madurai/demo-cadastral-grid")
-def demo_cadastral_grid(rows: int = 6, cols: int = 6):
+@router.get("/{city}/demo-cadastral-grid")
+def demo_cadastral_grid(city: str, parcels: int = 60, seed: int = 1):
     """
-    Synthetic grid — LABELLED demo data. Excluded from analytics and evidence.
-    Rendered in a distinct style by the frontend.
+    Synthetic parcel subdivision — LABELLED demo data. Excluded from
+    analytics and evidence. Rendered in a distinct style by the frontend.
+
+    Recursively splits the city core into `parcels` irregular rectangular
+    parcels (a randomized k-d style cut), which reads far more like a real
+    cadastral fabric than a uniform grid, while staying honestly synthetic.
     """
-    a = ee.CITY_CORE
-    dlat = (a["lat_max"] - a["lat_min"]) / rows
-    dlon = (a["lon_max"] - a["lon_min"]) / cols
-    feats = []
-    for i in range(rows):
-        for j in range(cols):
-            y0 = a["lat_min"] + i * dlat
-            x0 = a["lon_min"] + j * dlon
-            feats.append({
-                "type": "Feature",
-                "geometry": {"type": "Polygon", "coordinates": [[
-                    [x0, y0], [x0 + dlon, y0], [x0 + dlon, y0 + dlat],
-                    [x0, y0 + dlat], [x0, y0]]]},
-                "properties": {"demo_parcel_id": f"DEMO-{i:02d}-{j:02d}",
-                               "is_demo": True},
-            })
+    c = _city_or_404(city)
+    from services import cadastral_demo
+
+    feats = cadastral_demo.generate_parcels(c["cadastral_patch"], parcels, seed)
     return {
         "available": True,
         "dataset": "demo_cadastral_grid",
         "status": reg.Status.DEMO_ONLY.value,
         "is_demo": True,
-        "label": "DEMO DATA — SAMPLE DIGITAL CADASTRAL GRID (not real parcels)",
+        "label": "DEMO DATA — SAMPLE DIGITAL CADASTRAL FABRIC (not real parcels)",
         "analytical_use": "forbidden",
         "geojson": {"type": "FeatureCollection", "features": feats},
     }

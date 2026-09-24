@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import useAsync from '../hooks/useAsync.js'
 import api from '../services/api.js'
 import { Loading, ErrorBox, StatusBadge } from '../components/Bits.jsx'
+import Reveal from '../components/Reveal.jsx'
 
 export default function OfficialDataAccessPage() {
   const { data, error, loading } = useAsync(() => api.registry(), [])
@@ -28,8 +29,8 @@ export default function OfficialDataAccessPage() {
       {loading && <Loading what="registry" />}
       <ErrorBox error={error} />
 
-      {data && Object.entries(groups).map(([status, items]) => (
-        <div className="card" key={status}>
+      {data && Object.entries(groups).map(([status, items], i) => (
+        <Reveal className="card" key={status} delay={i * 90}>
           <h3><StatusBadge status={status} /> &nbsp; {items.length} dataset(s)</h3>
           <table>
             <thead><tr><th>Dataset</th><th>Authority</th><th>How to obtain</th></tr></thead>
@@ -43,10 +44,10 @@ export default function OfficialDataAccessPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </Reveal>
       ))}
 
-      <div className="card">
+      <Reveal className="card" delay={270}>
         <h3>Principle</h3>
         <p className="muted">
           Restricted and document-only sources are never approximated with demo
@@ -54,7 +55,7 @@ export default function OfficialDataAccessPage() {
           report until acquired through the proper channel and registered with
           full provenance.
         </p>
-      </div>
+      </Reveal>
     </div>
   )
 }

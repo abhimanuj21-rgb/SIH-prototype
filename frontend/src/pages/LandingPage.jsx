@@ -1,6 +1,9 @@
+import { useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import useAsync from '../hooks/useAsync.js'
 import api from '../services/api.js'
+import Reveal from '../components/Reveal.jsx'
+import useTilt from '../hooks/useTilt.js'
 
 const PIPELINE = [
   ['Real data', 'Only sources we can actually pull or cite'],
@@ -12,16 +15,39 @@ const PIPELINE = [
 ]
 
 const CHECKS = [
-  ['🌡️', 'Climate', 'ERA5 normals — temperature, rainfall, wet days', 'verified'],
-  ['💧', 'Water & water bodies', 'Nearest river, tank, canal; counts within 2.5 km', 'verified'],
-  ['🌾', 'Land use', 'Agricultural vs built-up, from OSM land-use polygons', 'verified'],
-  ['🏗️', 'Development level', 'Urban / peri-urban / rural, from an OSM density proxy', 'verified'],
-  ['🛣️', 'Infrastructure access', 'Distance to roads, hospitals, schools, rail', 'verified'],
-  ['⛰️', 'Terrain, cadastre, flood, soil', 'Named as explicit gaps until the data is acquired', 'gap'],
+  ['🛣️', 'Access & comparison', 'Distance to roads, hospitals, schools, rail — vs the rest of the city', 'verified'],
+  ['🌦️', 'Live weather', 'Current conditions and 7-day forecast, checked against the nearest airport station', 'verified'],
+  ['💨', 'Live air (Indian AQI)', 'Six pollutants, CPCB AQI method, past and next 24 hours', 'verified'],
+  ['🌡️', 'Climate normals', '10 years of ERA5 — monthly rain, heat, sunshine', 'verified'],
+  ['⛰️', 'Terrain', 'Elevation, slope, low-spot check and cross-sections (Copernicus DEM)', 'verified'],
+  ['🟫', 'Soil (modelled)', 'Texture, pH, organic carbon from ISRIC SoilGrids', 'verified'],
+  ['💧', 'Water & land use', 'Nearest river / tank, farmland vs built-up, development level', 'verified'],
+  ['🏪', 'Everyday amenities', 'Banks, shops, bus stops, pharmacies within 500 m / 1 km', 'verified'],
+  ['📄', 'Cadastre, ownership, flood, zoning', 'Named as explicit gaps until official data is obtained', 'gap'],
 ]
 
 export default function LandingPage() {
   const { data } = useAsync(() => api.registrySummary(), [])
+  const heroBgRef = useRef(null)
+  const miniRef = useTilt(6)
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    let raf = null
+    const onScroll = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = null
+        const offset = Math.min(window.scrollY * 0.12, 40)
+        if (heroBgRef.current) heroBgRef.current.style.transform = `translateY(${offset}px)`
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      window.removeEventListener('scroll', onScroll)
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [])
 
   return (
     <div className="lp">
@@ -36,13 +62,15 @@ export default function LandingPage() {
       </header>
 
       <section className="lp-hero">
+        <div className="lp-hero__bg" ref={heroBgRef} />
+        <div className="lp-hero__fade" />
         <div className="lp-hero__text">
-          <div className="lp-kicker">Evidence-first · Madurai prototype</div>
-          <h1>Land intelligence you can defend, one location at a time.</h1>
+          <div className="lp-kicker">Evidence-first · Madurai, Bhopal &amp; Kovilpatti prototypes</div>
+          <h1><em>Land intelligence</em><br />you can defend, one location at a time.</h1>
           <p>
             A national digital platform for land governance and research. It reports
-            only what real data can substantiate — climate, water, land use, access,
-            development — and names every gap instead of guessing.
+            only what real data can substantiate — access, live weather and air, terrain,
+            soil, water, land use — and names every gap instead of guessing.
           </p>
           <div className="lp-cta">
             <Link to="/app/explorer" className="btn lg">Explore the map</Link>
@@ -52,81 +80,88 @@ export default function LandingPage() {
         </div>
 
         <div className="lp-hero__card">
-          <div className="lp-mini">
+          <div className="lp-mini" ref={miniRef}>
             <div className="lp-mini__head">Evidence report · 9.9252, 78.1198</div>
             <div className="lp-mini__row"><span className="chip water">💧 Vaigai ~483 m</span><span className="chip">Potramarai Kulam ~680 m</span></div>
-            <div className="lp-mini__row"><span className="chip built">🏗️ Urban / built-up</span><span className="chip">28.7 °C · 1178 mm/yr</span></div>
-            <div className="lp-mini__row"><span className="chip">🛣️ road ~3 m · hospital ~91 m</span></div>
-            <div className="lp-mini__gap">Gaps: terrain · cadastre · flood hazard · soil · zoning</div>
+            <div className="lp-mini__row"><span className="chip built">🏗️ Urban / built-up</span><span className="chip">28.7 °C · 1186 mm/yr</span></div>
+            <div className="lp-mini__row"><span className="chip">🛣️ road ~24 m · hospital ~91 m</span></div>
+            <div className="lp-mini__gap">Gaps: cadastre · ownership · flood hazard · zoning</div>
           </div>
         </div>
       </section>
 
       <section className="lp-section">
-        <div className="section-title">The pipeline — and where this build is</div>
+        <Reveal className="section-title">The pipeline — and where this build is</Reveal>
         <div className="lp-pipeline">
           {PIPELINE.map(([step, desc, here], i) => (
-            <div key={step} className={`lp-step${here ? ' here' : ''}`}>
+            <Reveal as="div" key={step} delay={i * 70} className={`lp-step${here ? ' here' : ''}`}>
               <div className="lp-step__n">{i + 1}</div>
               <div className="lp-step__name">{step}{here && <span className="lp-here">you are here</span>}</div>
               <div className="lp-step__desc">{desc}</div>
-            </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
       <section className="lp-section">
         <div className="lp-stats">
-          <div><b>{data?.total ?? '26'}</b><span>datasets registered</span></div>
-          <div><b>{data?.analytically_usable_count ?? '—'}</b><span>usable for analysis now</span></div>
-          <div><b>{data?.by_status?.OFFICIAL_ACCESS_REQUIRED ?? '—'}</b><span>need government access</span></div>
-          <div><b>{data?.by_status?.DATA_UNAVAILABLE ?? '—'}</b><span>open, acquisition pending</span></div>
-        </div>
-      </section>
-
-      <section className="lp-section">
-        <div className="section-title">What you can check for any point in Madurai</div>
-        <div className="lp-checks">
-          {CHECKS.map(([ic, title, desc, tag]) => (
-            <div className="lp-check" key={title}>
-              <div className="lp-check__ic">{ic}</div>
-              <div>
-                <div className="lp-check__t">{title} <span className={`badge badge--${tag === 'verified' ? 'AVAILABLE' : 'DATA_UNAVAILABLE'}`}>{tag}</span></div>
-                <div className="lp-check__d">{desc}</div>
-              </div>
-            </div>
+          {[
+            [data?.total ?? '—', 'datasets registered'],
+            [data?.analytically_usable_count ?? '—', 'usable for analysis now'],
+            [data?.by_status?.OFFICIAL_ACCESS_REQUIRED ?? '—', 'need government access'],
+            [data?.by_status?.DATA_UNAVAILABLE ?? '—', 'open, acquisition pending'],
+          ].map(([n, label], i) => (
+            <Reveal as="div" key={label} delay={i * 70}>
+              <b>{n}</b><span>{label}</span>
+            </Reveal>
           ))}
         </div>
       </section>
 
       <section className="lp-section">
-        <div className="section-title">Data governance is the product</div>
-        <div className="lp-gov">
-          <Link to="/app/data-registry" className="lp-gov__card">
-            <h3>Data Registry</h3>
-            <p>Every dataset with source, authority, licence, limitations and a single analytical gate.</p>
-          </Link>
-          <Link to="/app/data-quality" className="lp-gov__card">
-            <h3>Quality audit</h3>
-            <p>Automated checks — provenance completeness, status sanity, and proof no demo data reaches analysis.</p>
-          </Link>
-          <Link to="/app/official-data-access" className="lp-gov__card">
-            <h3>Official access</h3>
-            <p>Restricted layers (cadastre, ownership, flood, soil) with the authority and the request path.</p>
-          </Link>
+        <Reveal className="section-title">What you can check for any point in Madurai, Bhopal or Kovilpatti</Reveal>
+        <div className="lp-checks">
+          {CHECKS.map(([ic, title, desc, tag], i) => (
+            <Reveal as="div" key={title} delay={i * 60} className="lp-check">
+              <div className="lp-check__ic">{ic}</div>
+              <div>
+                <div className="lp-check__t">{title} <span className={`badge badge--${tag === 'verified' ? 'AVAILABLE' : 'DATA_UNAVAILABLE'}`}>{tag}</span></div>
+                <div className="lp-check__d">{desc}</div>
+              </div>
+            </Reveal>
+          ))}
         </div>
       </section>
 
-      <footer className="lp-footer">
+      <section className="lp-section">
+        <Reveal className="section-title">Data governance is the product</Reveal>
+        <div className="lp-gov">
+          <Reveal as={Link} to="/app/data-registry" delay={0} tilt={7} className="lp-gov__card">
+            <h3>Data Registry</h3>
+            <p>Every dataset with source, authority, licence, limitations and a single analytical gate.</p>
+          </Reveal>
+          <Reveal as={Link} to="/app/data-quality" delay={90} tilt={7} className="lp-gov__card">
+            <h3>Quality audit</h3>
+            <p>Automated checks — provenance completeness, status sanity, and proof no demo data reaches analysis.</p>
+          </Reveal>
+          <Reveal as={Link} to="/app/official-data-access" delay={180} tilt={7} className="lp-gov__card">
+            <h3>Official access</h3>
+            <p>Restricted layers (cadastre, ownership, flood, soil) with the authority and the request path.</p>
+          </Reveal>
+        </div>
+      </section>
+
+      <Reveal as="footer" className="lp-footer">
         <div>
-          <strong>National Digital Platform</strong> — evidence-first prototype, Madurai.
+          <strong>National Digital Platform</strong> — evidence-first prototype, Madurai, Bhopal &amp; Kovilpatti.
           Descriptive only. Not for legal, valuation or statutory use.
         </div>
         <div className="faint">
-          React + Vite + Leaflet · FastAPI · OpenStreetMap / Overpass · Open-Meteo (ERA5) ·
-          Esri imagery · boundary © OpenStreetMap contributors
+          React + Vite + Leaflet · FastAPI · OpenStreetMap / Overpass / Nominatim · Open-Meteo (ERA5,
+          forecast, Copernicus DEM, CAMS air) · ISRIC SoilGrids · NOAA Aviation Weather Center ·
+          Esri imagery · map data © OpenStreetMap contributors
         </div>
-      </footer>
+      </Reveal>
     </div>
   )
 }
